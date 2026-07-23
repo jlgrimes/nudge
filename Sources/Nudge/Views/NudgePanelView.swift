@@ -8,7 +8,8 @@ enum NudgePanelLayout {
     static let contentHorizontalPadding: CGFloat = 12
     static let surfaceCornerRadius: CGFloat = 16
     static let focusCornerRadius: CGFloat = 12
-    static let surfaceVerticalPadding: CGFloat = 6
+    static let surfaceTopPadding: CGFloat = 6
+    static let surfaceBottomPadding: CGFloat = 4
     static let rowOuterHorizontalPadding: CGFloat = 8
     static let rowInnerHorizontalPadding: CGFloat = 12
     static let timelineMarkerWidth: CGFloat = 56
@@ -107,7 +108,8 @@ private struct CollapsedContent: View {
                         .transition(.push(from: .bottom))
                     }
                 }
-                .padding(.vertical, NudgePanelLayout.surfaceVerticalPadding)
+                .padding(.top, NudgePanelLayout.surfaceTopPadding)
+                .padding(.bottom, NudgePanelLayout.surfaceBottomPadding)
                 .animation(
                     reduceMotion ? nil : .snappy(duration: 0.32),
                     value: items.map(\.id)
@@ -295,33 +297,89 @@ private struct NudgeListRow: View {
     var displayedAt: Date? = nil
     var isMuted = false
     var showsExpandControl = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
+    @State private var isCompleting = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 0) {
-            timelineMarker
-                .frame(width: NudgePanelLayout.timelineMarkerWidth, alignment: .trailing)
-                .padding(.trailing, NudgePanelLayout.timelineMarkerSpacing)
+        ZStack(alignment: .trailing) {
+            Button(action: beginCompletion) {
+                HStack(alignment: .center, spacing: 0) {
+                    timelineMarker
+                        .frame(width: NudgePanelLayout.timelineMarkerWidth, alignment: .trailing)
+                        .padding(.trailing, NudgePanelLayout.timelineMarkerSpacing)
 
-            ZStack {
-                Circle()
-                    .fill(Color.primary.opacity(0.08))
-                    .overlay {
-                        Circle()
-                            .stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.5)
+                    titleLabel
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if trailingActionWidth > 0 {
+                        Color.clear
+                            .frame(width: trailingActionWidth, height: 20)
                     }
-                    .frame(width: 18, height: 18)
-
-                completionButton
+                }
+                .padding(.horizontal, NudgePanelLayout.rowInnerHorizontalPadding)
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .contentShape(.rect)
             }
-            .frame(width: 20)
-            .frame(maxHeight: .infinity)
+            .buttonStyle(.plain)
+            .help("Mark Complete")
+            .accessibilityLabel("Complete \(item.title)")
 
-            titleLabel
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 5)
+            trailingActions
+                .padding(.trailing, NudgePanelLayout.rowInnerHorizontalPadding)
+        }
+        .frame(minHeight: 40)
+        .contentShape(.rect)
+        .background {
+            RoundedRectangle(cornerRadius: NudgePanelLayout.focusCornerRadius, style: .continuous)
+                .fill(Color.primary.opacity(isHovered || isCompleting ? 0.055 : 0))
+        }
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovered = hovering
+            }
+        }
+    }
 
+    @ViewBuilder
+    private var titleLabel: some View {
+        Group {
+            if isMuted {
+                ZStack(alignment: .leading) {
+                    Text(item.title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .opacity(isHovered ? 0 : 1)
+
+                    Text(item.title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .opacity(isHovered ? 1 : 0)
+                        .accessibilityHidden(true)
+                }
+            } else {
+                Text(item.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+        }
+        .overlay {
+            GeometryReader { proxy in
+                Capsule()
+                    .fill(Color.primary.opacity(0.72))
+                    .frame(width: proxy.size.width, height: 1.5)
+                    .scaleEffect(x: isCompleting ? 1 : 0, anchor: .leading)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
+            .allowsHitTesting(false)
+        }
+        .opacity(isCompleting ? 0.66 : 1)
+    }
+
+    @ViewBuilder
+    private var trailingActions: some View {
+        HStack(spacing: 5) {
             if let url = item.primaryURL {
                 Button {
                     NSWorkspace.shared.open(url)
@@ -331,7 +389,6 @@ private struct NudgeListRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Open Link")
-                .padding(.leading, 5)
             }
 
             if showsExpandControl {
@@ -343,59 +400,31 @@ private struct NudgeListRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Show Upcoming and New Nudge")
-                .padding(.leading, 5)
             }
         }
-        .padding(.horizontal, NudgePanelLayout.rowInnerHorizontalPadding)
-        .frame(minHeight: 40)
-        .contentShape(.rect)
-        .background {
-            RoundedRectangle(cornerRadius: NudgePanelLayout.focusCornerRadius, style: .continuous)
-                .fill(Color.primary.opacity(isMuted && isHovered ? 0.055 : 0))
-        }
-        .onHover { hovering in
-            guard isMuted else { return }
-            withAnimation(.easeOut(duration: 0.16)) {
-                isHovered = hovering
-            }
-        }
-        .accessibilityElement(children: .contain)
+        .padding(.leading, trailingActionWidth > 0 ? 5 : 0)
     }
 
-    @ViewBuilder
-    private var titleLabel: some View {
-        if isMuted {
-            ZStack(alignment: .leading) {
-                Text(item.title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .opacity(isHovered ? 0 : 1)
-
-                Text(item.title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .opacity(isHovered ? 1 : 0)
-                    .accessibilityHidden(true)
-            }
-        } else {
-            Text(item.title)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
-        }
+    private var trailingActionWidth: CGFloat {
+        let linkWidth: CGFloat = item.primaryURL == nil ? 0 : 25
+        let expandWidth: CGFloat = showsExpandControl ? 21 : 0
+        return linkWidth + expandWidth
     }
 
-    private var completionButton: some View {
-        Button {
+    private func beginCompletion() {
+        guard !isCompleting else { return }
+
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.26)) {
+            isCompleting = true
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(
+                for: reduceMotion ? .milliseconds(80) : .milliseconds(320)
+            )
+            guard !Task.isCancelled else { return }
             store.complete(item.id)
-        } label: {
-            Image(systemName: "circle")
-                .symbolRenderingMode(.hierarchical)
-                .font(.body)
-                .foregroundStyle(priorityColor)
-                .frame(width: 20, height: 20)
         }
-        .buttonStyle(.borderless)
-        .help("Mark Complete")
     }
 
     @ViewBuilder
@@ -418,15 +447,6 @@ private struct NudgeListRow: View {
         }
     }
 
-    private var priorityColor: Color {
-        if isMuted { return .secondary }
-
-        switch item.priority {
-        case .urgent: return .orange
-        case .actionable: return .accentColor
-        case .informational: return .secondary
-        }
-    }
 }
 
 private struct FocusRecap: View {

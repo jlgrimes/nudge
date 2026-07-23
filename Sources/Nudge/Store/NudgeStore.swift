@@ -272,7 +272,7 @@ final class NudgeStore {
             demoTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 for item in dayNudges.dropFirst() {
-                    try? await Task.sleep(for: .milliseconds(650))
+            try? await Task.sleep(for: .milliseconds(900))
                     guard !Task.isCancelled else { return }
                     nudges.append(item)
                     activeContextLabel = "Today · \(nudges.count) unresolved nudges"

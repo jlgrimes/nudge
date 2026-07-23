@@ -159,7 +159,7 @@ final class ContextInferenceEngineTests: XCTestCase {
         let store = NudgeStore(seedDemoData: false)
         store.runDebugScenario(.day)
 
-        try? await Task.sleep(for: .milliseconds(750))
+        try? await Task.sleep(for: .seconds(1.1))
 
         XCTAssertEqual(store.activeNudges.count, 2)
         store.resetDemo()

@@ -139,7 +139,9 @@ final class FloatingPanelController {
         case .collapsed:
             let contentHeight = max(
                 56,
-                CGFloat(activeCount * 40) + NudgePanelLayout.surfaceVerticalPadding * 2
+                CGFloat(activeCount * 40)
+                    + NudgePanelLayout.surfaceTopPadding
+                    + NudgePanelLayout.surfaceBottomPadding
             )
             return NSSize(
                 width: standardPanelWidth,
