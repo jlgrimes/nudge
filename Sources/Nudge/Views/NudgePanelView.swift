@@ -9,6 +9,8 @@ enum NudgePanelLayout {
     static let surfaceCornerRadius: CGFloat = 16
     static let focusCornerRadius: CGFloat = 12
     static let surfaceVerticalPadding: CGFloat = 6
+    static let rowOuterHorizontalPadding: CGFloat = 8
+    static let rowInnerHorizontalPadding: CGFloat = 12
     static let timelineMarkerWidth: CGFloat = 56
     static let timelineMarkerSpacing: CGFloat = 7
     static let surfaceRightMargin: CGFloat = 18
@@ -101,7 +103,7 @@ private struct CollapsedContent: View {
                             showsExpandControl: item.id == items.last?.id
                         )
                         .id(item.id)
-                        .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
+                        .padding(.horizontal, NudgePanelLayout.rowOuterHorizontalPadding)
                         .transition(.push(from: .bottom))
                     }
                 }
@@ -181,7 +183,7 @@ private struct ExpandedContent: View {
                                     isMuted: true
                                 )
                                 .id(item.id)
-                                .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
+                                .padding(.horizontal, NudgePanelLayout.rowOuterHorizontalPadding)
                                 .transition(.push(from: .bottom))
                             }
 
@@ -204,7 +206,7 @@ private struct ExpandedContent: View {
                                         isMuted: true
                                     )
                                     .id(item.id)
-                                    .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
+                                    .padding(.horizontal, NudgePanelLayout.rowOuterHorizontalPadding)
                                 }
                             }
                         }
@@ -344,6 +346,7 @@ private struct NudgeListRow: View {
                 .padding(.leading, 5)
             }
         }
+        .padding(.horizontal, NudgePanelLayout.rowInnerHorizontalPadding)
         .frame(minHeight: 40)
         .contentShape(.rect)
         .background {
