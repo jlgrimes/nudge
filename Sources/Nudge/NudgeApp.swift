@@ -21,12 +21,14 @@ struct NudgeApp: App {
 @MainActor
 final class NudgeAppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: FloatingPanelController?
+    private var debugPanelController: DebugPanelController?
     private var hotKeyManager: GlobalHotKeyManager?
     private var appContextMonitor: AppContextMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         panelController = FloatingPanelController(store: .shared)
+        debugPanelController = DebugPanelController(store: .shared)
         hotKeyManager = GlobalHotKeyManager {
             NudgeStore.shared.showCapture()
         }

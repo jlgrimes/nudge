@@ -26,12 +26,16 @@ final class FloatingPanelController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.animationBehavior = .utilityWindow
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = NSHostingView(rootView: NudgePanelView(store: store))
 
         store.presentationDidChange = { [weak self] in
+            self?.updatePresentation()
+        }
+        store.panelLayoutDidChange = { [weak self] in
             self?.updatePresentation()
         }
 
@@ -46,10 +50,7 @@ final class FloatingPanelController {
 
     private func updatePresentation() {
         let targetSize = Self.size(for: store)
-        // Animating a transparent NSPanel's frame while Liquid Glass is sampling
-        // the desktop can leave a stale blur region behind on some displays.
-        // SwiftUI still animates the content; resize the compositor surface atomically.
-        position(size: targetSize, animated: false)
+        position(size: targetSize, animated: true)
         panel.contentView?.needsDisplay = true
 
         if store.presentation == .capture {
@@ -61,19 +62,21 @@ final class FloatingPanelController {
     }
 
     private func position(size: NSSize, animated: Bool) {
-        guard let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        let mouseLocation = NSEvent.mouseLocation
+        let pointerScreen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
+        guard let screen = panel.screen ?? pointerScreen ?? NSScreen.main ?? NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
         let rightMargin: CGFloat = 18
-        let centerY = visible.minY + (visible.height * 0.54)
+        let topMargin: CGFloat = 54
         let origin = NSPoint(
             x: visible.maxX - size.width - rightMargin,
-            y: min(max(centerY - size.height / 2, visible.minY + 18), visible.maxY - size.height - 18)
+            y: max(visible.minY + 18, visible.maxY - topMargin - size.height)
         )
         let frame = NSRect(origin: origin, size: size)
 
         if animated {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.28
+                context.duration = 0.24
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 panel.animator().setFrame(frame, display: true)
             }
@@ -85,13 +88,15 @@ final class FloatingPanelController {
     private static func size(for store: NudgeStore) -> NSSize {
         switch store.presentation {
         case .collapsed:
-            NSSize(width: 72, height: 72)
+            return NSSize(width: 64, height: 64)
         case .peek:
-            NSSize(width: 390, height: 112)
+            return NSSize(width: 360, height: 86)
         case .expanded:
-            NSSize(width: 410, height: min(650, CGFloat(190 + store.activeNudges.count * 92)))
+            let recapHeight: CGFloat = store.recapMessage == nil ? 0 : 64
+            let contentHeight = CGFloat(112 + store.activeNudges.count * 70) + recapHeight
+            return NSSize(width: 372, height: min(540, max(200, contentHeight)))
         case .capture:
-            NSSize(width: 430, height: store.capturePreview == nil ? 180 : 254)
+            return NSSize(width: 420, height: store.capturePreview == nil ? 154 : 220)
         }
     }
 }

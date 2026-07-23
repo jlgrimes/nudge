@@ -80,6 +80,7 @@ struct NudgeItem: Identifiable, Hashable, Sendable {
     let fallbackAt: Date
     let createdAt: Date
     var status: NudgeStatus
+    var surfacedAt: Date?
     let primaryURL: URL?
     let canInterruptFocus: Bool
 
@@ -93,6 +94,7 @@ struct NudgeItem: Identifiable, Hashable, Sendable {
         fallbackAt: Date,
         createdAt: Date = .now,
         status: NudgeStatus = .pending,
+        surfacedAt: Date? = nil,
         primaryURL: URL? = nil,
         canInterruptFocus: Bool = false
     ) {
@@ -105,12 +107,17 @@ struct NudgeItem: Identifiable, Hashable, Sendable {
         self.fallbackAt = fallbackAt
         self.createdAt = createdAt
         self.status = status
+        self.surfacedAt = surfacedAt ?? (status == .active ? createdAt : nil)
         self.primaryURL = primaryURL
         self.canInterruptFocus = canInterruptFocus
     }
 
     var contextLabel: String {
         triggers.first?.kind.label ?? "At a helpful moment"
+    }
+
+    var timelineDate: Date {
+        surfacedAt ?? createdAt
     }
 }
 

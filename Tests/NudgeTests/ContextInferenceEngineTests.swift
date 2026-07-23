@@ -63,4 +63,50 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertTrue(store.activeNudges.contains(where: { $0.title == "Order coffee filters" }))
         XCTAssertNotNil(store.recapMessage)
     }
+
+    @MainActor
+    func testDayScenarioBeginsAGrowingAmbientList() {
+        let store = NudgeStore(seedDemoData: false)
+
+        store.runDebugScenario(.day)
+
+        XCTAssertEqual(store.activeNudges.count, 1)
+        XCTAssertEqual(store.presentation, .expanded)
+        XCTAssertEqual(store.activeDebugScenario, .day)
+        store.resetDemo()
+    }
+
+    @MainActor
+    func testMultipleNotificationScenarioShowsOneExpandedList() {
+        let store = NudgeStore(seedDemoData: false)
+
+        store.runDebugScenario(.multiple)
+
+        XCTAssertEqual(store.activeNudges.count, 4)
+        XCTAssertEqual(store.presentation, .expanded)
+        XCTAssertEqual(store.activeContextLabel, "4 nudges arrived together")
+    }
+
+    @MainActor
+    func testFocusScenarioHoldsNormalNudgesButShowsUrgentOne() {
+        let store = NudgeStore(seedDemoData: false)
+
+        store.runDebugScenario(.focus)
+
+        XCTAssertTrue(store.isFocusMode)
+        XCTAssertEqual(store.deferredCount, 2)
+        XCTAssertEqual(store.activeNudges.count, 1)
+        XCTAssertEqual(store.activeNudges.first?.priority, .urgent)
+        store.resetDemo()
+    }
+
+    @MainActor
+    func testContextualNotificationIsTimestampedAtBottomOfTimeline() {
+        let store = NudgeStore()
+
+        store.receive(context: .slack)
+
+        XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
+        XCTAssertNotNil(store.activeNudges.last?.surfacedAt)
+    }
 }
