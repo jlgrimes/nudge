@@ -130,35 +130,32 @@ final class FloatingPanelController {
     }
 
     private static func size(for store: NudgeStore) -> NSSize {
-        let incomingIDs = Set(store.surfacedBatch?.nudgeIDs ?? [])
-        let incomingCount = store.activeNudges.count { incomingIDs.contains($0.id) }
-        let settledActiveCount = store.activeNudges.count - incomingCount
-        let batchHeaderHeight: CGFloat = incomingCount > 1 ? 30 : 0
-        let incomingHeight = incomingCount > 0
-            ? CGFloat(incomingCount * 40) + batchHeaderHeight + 22
-            : 0
+        let activeCount = store.activeNudges.count
         let glassInsets = NudgePanelLayout.glassViewportInset * 2
         let standardPanelWidth = NudgePanelLayout.standardContentWidth + glassInsets
         let capturePanelWidth = NudgePanelLayout.captureContentWidth + glassInsets
 
         switch store.presentation {
         case .collapsed:
-            let settledHeight = max(56, CGFloat(settledActiveCount * 40))
+            let contentHeight = max(
+                56,
+                CGFloat(activeCount * 40) + NudgePanelLayout.surfaceVerticalPadding * 2
+            )
             return NSSize(
                 width: standardPanelWidth,
-                height: min(608, settledHeight + incomingHeight) + glassInsets
+                height: min(608, contentHeight) + glassInsets
             )
         case .peek:
             return NSSize(
                 width: standardPanelWidth,
-                height: min(608, 86 + incomingHeight) + glassInsets
+                height: 86 + glassInsets
             )
         case .expanded:
             let recapHeight: CGFloat = store.recapMessage == nil ? 0 : 64
             let upcomingHeaderHeight: CGFloat = store.futureNudges.isEmpty ? 0 : 26
-            let settledItemCount = settledActiveCount + store.futureNudges.count
-            let settledHeight = CGFloat(146 + settledItemCount * 40) + recapHeight + upcomingHeaderHeight
-            let contentHeight = max(180, settledHeight) + incomingHeight
+            let itemCount = activeCount + store.futureNudges.count
+            let listHeight = CGFloat(146 + itemCount * 40) + recapHeight + upcomingHeaderHeight
+            let contentHeight = max(180, listHeight)
             return NSSize(width: standardPanelWidth, height: min(638, contentHeight) + glassInsets)
         case .capture:
             let contentHeight: CGFloat = store.capturePreview == nil ? 122 : 194

@@ -6,18 +6,6 @@ import SwiftUI
 @MainActor
 @Observable
 final class NudgeStore {
-    struct SurfacedBatch: Identifiable, Equatable, Sendable {
-        let id: UUID
-        let nudgeIDs: [UUID]
-        let headerTitle: String?
-
-        init(id: UUID = UUID(), nudgeIDs: [UUID], headerTitle: String? = nil) {
-            self.id = id
-            self.nudgeIDs = nudgeIDs
-            self.headerTitle = headerTitle
-        }
-    }
-
     enum Presentation: Equatable {
         case collapsed
         case peek
@@ -52,9 +40,6 @@ final class NudgeStore {
     var fallbackDays = 2
     var isListening = false
     var activeDebugScenario: DebugScenario?
-    var surfacedBatch: SurfacedBatch? {
-        didSet { panelLayoutDidChange?() }
-    }
 
     @ObservationIgnored var presentationDidChange: (() -> Void)?
     @ObservationIgnored var panelLayoutDidChange: (() -> Void)?
@@ -183,11 +168,6 @@ final class NudgeStore {
             nudges.first(where: { $0.id == id })?.status == .active
         }) else { return }
 
-        let activeMatchingIDs = matchingIDs.filter { id in
-            nudges.first(where: { $0.id == id })?.status == .active
-        }
-        publishSurfaceBatch(activeMatchingIDs)
-
         if wasExpanded {
             panelLayoutDidChange?()
         } else {
@@ -234,7 +214,6 @@ final class NudgeStore {
         if !deferredIDs.isEmpty {
             recapMessage = nil
             activeContextLabel = "While you were away"
-            publishSurfaceBatch(deferredIDs, headerTitle: "While you were away")
             presentation = .collapsed
         } else {
             activeContextLabel = "Context ready"
@@ -244,7 +223,6 @@ final class NudgeStore {
     func resetDemo() {
         demoTask?.cancel()
         peekTask?.cancel()
-        surfacedBatch = nil
         nudges = Self.demoNudges()
         isFocusMode = false
         recapMessage = nil
@@ -290,18 +268,12 @@ final class NudgeStore {
             nudges = Array(dayNudges.prefix(1))
             activeContextLabel = "Today · 1 unresolved nudge"
             presentation = .collapsed
-            if let firstNudge = dayNudges.first {
-                publishSurfaceBatch([firstNudge.id])
-            }
 
             demoTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 for item in dayNudges.dropFirst() {
-                    // Leave enough room for the shared one-second hold and absorption
-                    // before materializing the next Day Stream bubble.
-                    try? await Task.sleep(for: .milliseconds(1_650))
+                    try? await Task.sleep(for: .milliseconds(650))
                     guard !Task.isCancelled else { return }
-                    publishSurfaceBatch([item.id])
                     nudges.append(item)
                     activeContextLabel = "Today · \(nudges.count) unresolved nudges"
                 }
@@ -316,21 +288,28 @@ final class NudgeStore {
                 try? await Task.sleep(for: .milliseconds(900))
                 guard let self, !Task.isCancelled else { return }
                 guard let index = nudges.firstIndex(where: { $0.title == "Message Alex" }) else { return }
-                let id = nudges[index].id
                 withAnimation(.snappy(duration: 0.42)) {
                     nudges[index].surfacedAt = .now
                     nudges[index].invocation = .contextual(.messaging)
+                    nudges[index].status = .active
                 }
                 activeContextLabel = "Slack is active · nudge refreshed"
-                publishSurfaceBatch([id])
             }
 
         case .multiple:
             let incomingNudges = Self.multipleScenarioNudges()
-            nudges = Self.settledScenarioNudges() + incomingNudges
-            activeContextLabel = "\(incomingNudges.count) nudges arrived together"
-            publishSurfaceBatch(incomingNudges.map(\.id))
+            nudges = Self.settledScenarioNudges()
+            activeContextLabel = "Timeline · waiting for notifications"
             presentation = .collapsed
+
+            demoTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(900))
+                guard let self, !Task.isCancelled else { return }
+                withAnimation(.snappy(duration: 0.32)) {
+                    nudges.append(contentsOf: incomingNudges)
+                }
+                activeContextLabel = "\(incomingNudges.count) nudges arrived together"
+            }
 
         case .focus:
             nudges = Self.settledScenarioNudges() + Self.focusScenarioNudges()
@@ -361,7 +340,6 @@ final class NudgeStore {
     private func prepareDebugScenario(_ scenario: DebugScenario) {
         demoTask?.cancel()
         peekTask?.cancel()
-        surfacedBatch = nil
         activeDebugScenario = scenario
         nudges = []
         isFocusMode = false
@@ -370,16 +348,6 @@ final class NudgeStore {
         capturePreview = nil
         activeContextLabel = "Context ready"
         presentation = .collapsed
-    }
-
-    func acknowledgeSurfacedBatch(_ id: UUID) {
-        guard surfacedBatch?.id == id else { return }
-        surfacedBatch = nil
-    }
-
-    private func publishSurfaceBatch(_ ids: [UUID], headerTitle: String? = nil) {
-        guard !ids.isEmpty else { return }
-        surfacedBatch = SurfacedBatch(nudgeIDs: ids, headerTitle: headerTitle)
     }
 
     private static func demoNudges() -> [NudgeItem] {
@@ -551,7 +519,7 @@ final class NudgeStore {
                 detail: "",
                 triggers: [context],
                 fallbackAt: fallback,
-                createdAt: now.addingTimeInterval(-3_600),
+                createdAt: now.addingTimeInterval(-900),
                 status: .active
             ),
             NudgeItem(
@@ -561,25 +529,7 @@ final class NudgeStore {
                 triggers: [messaging],
                 fallbackAt: fallback,
                 createdAt: now.addingTimeInterval(-2_400),
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Submit expenses",
-                title: "Submit this week’s expenses",
-                detail: "",
-                triggers: [context],
-                fallbackAt: fallback,
-                createdAt: now.addingTimeInterval(-1_800),
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Order coffee filters",
-                title: "Order coffee filters",
-                detail: "",
-                triggers: [context],
-                fallbackAt: fallback,
-                createdAt: now.addingTimeInterval(-900),
-                status: .active
+                status: .pending
             )
         ]
     }

@@ -6,6 +6,11 @@ enum NudgePanelLayout {
     static let standardContentWidth: CGFloat = 360
     static let captureContentWidth: CGFloat = 408
     static let contentHorizontalPadding: CGFloat = 12
+    static let surfaceCornerRadius: CGFloat = 16
+    static let focusCornerRadius: CGFloat = 12
+    static let surfaceVerticalPadding: CGFloat = 6
+    static let timelineMarkerWidth: CGFloat = 56
+    static let timelineMarkerSpacing: CGFloat = 7
     static let surfaceRightMargin: CGFloat = 18
     static let surfaceTopMargin: CGFloat = 54
 }
@@ -13,56 +18,23 @@ enum NudgePanelLayout {
 struct NudgePanelView: View {
     @Bindable var store: NudgeStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var glassNamespace
-    @State private var displayedBatch: NudgeStore.SurfacedBatch?
-    @State private var arrivalPhase: ArrivalPhase = .idle
-
-    private let glassSpacing: CGFloat = 12
-    private let surfaceGap: CGFloat = 10
 
     var body: some View {
         GeometryReader { proxy in
-            GlassEffectContainer(spacing: glassSpacing) {
-                VStack(spacing: incomingNudges.isEmpty ? 0 : surfaceGap) {
-                    primaryContent
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: 44,
-                            maxHeight: primarySurfaceHeight(in: proxy.size.height)
-                        )
-                        .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-                        .glassEffectID("nudge-primary-surface", in: glassNamespace)
-
-                    if !incomingNudges.isEmpty, let displayedBatch {
-                        IncomingNudgeSurface(
-                            items: incomingNudges,
-                            batch: displayedBatch,
-                            store: store
-                        )
-                        .frame(maxWidth: .infinity)
-                        .frame(height: resolvedIncomingHeight(in: proxy.size.height))
-                        .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                        .glassEffectID(displayedBatch.id, in: glassNamespace)
-                        .glassEffectTransition(.materialize)
-                        .scaleEffect(arrivalPhase == .absorbing ? 0.985 : 1, anchor: .topTrailing)
-                        .offset(y: arrivalPhase == .absorbing ? -8 : 0)
-                        .opacity(arrivalPhase == .absorbing ? 0.12 : 1)
-                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topTrailing)))
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            primaryContent
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: 44,
+                    maxHeight: proxy.size.height
+                )
+                .glassEffect(
+                    .regular,
+                    in: .rect(cornerRadius: NudgePanelLayout.surfaceCornerRadius)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
         .padding(NudgePanelLayout.glassViewportInset)
         .animation(reduceMotion ? nil : .snappy(duration: 0.24), value: store.presentation)
-        .task(id: store.surfacedBatch?.id) {
-            guard let batch = store.surfacedBatch else { return }
-            await present(batch)
-        }
-    }
-
-    private var cornerRadius: CGFloat {
-        store.presentation == .collapsed ? 14 : 16
     }
 
     @ViewBuilder
@@ -70,11 +42,11 @@ struct NudgePanelView: View {
         Group {
             switch store.presentation {
             case .collapsed:
-                CollapsedContent(items: settledActiveNudges, store: store)
+                CollapsedContent(items: store.activeNudges, store: store)
             case .peek:
-                PeekContent(latest: settledActiveNudges.last, store: store)
+                PeekContent(latest: store.activeNudges.last, store: store)
             case .expanded:
-                ExpandedContent(activeNudges: settledActiveNudges, store: store)
+                ExpandedContent(activeNudges: store.activeNudges, store: store)
             case .capture:
                 CaptureView(store: store)
             }
@@ -82,84 +54,12 @@ struct NudgePanelView: View {
         .transition(.opacity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-
-    private var incomingNudges: [NudgeItem] {
-        guard let displayedBatch else { return [] }
-        let ids = Set(displayedBatch.nudgeIDs)
-        return store.activeNudges.filter { ids.contains($0.id) }
-    }
-
-    private var settledActiveNudges: [NudgeItem] {
-        let incomingIDs = Set((displayedBatch ?? store.surfacedBatch)?.nudgeIDs ?? [])
-        return store.activeNudges.filter { !incomingIDs.contains($0.id) }
-    }
-
-    private var desiredIncomingHeight: CGFloat {
-        guard !incomingNudges.isEmpty else { return 0 }
-        let batchHeaderHeight: CGFloat = incomingNudges.count > 1 ? 30 : 0
-        return CGFloat(incomingNudges.count * 40) + batchHeaderHeight + 12
-    }
-
-    private func resolvedIncomingHeight(in availableHeight: CGFloat) -> CGFloat {
-        min(desiredIncomingHeight, max(0, availableHeight - 44 - surfaceGap))
-    }
-
-    private func primarySurfaceHeight(in availableHeight: CGFloat) -> CGFloat {
-        guard !incomingNudges.isEmpty else { return availableHeight }
-        return max(44, availableHeight - resolvedIncomingHeight(in: availableHeight) - surfaceGap)
-    }
-
-    @MainActor
-    private func present(_ batch: NudgeStore.SurfacedBatch) async {
-        let isGroupedArrival = batch.nudgeIDs.count > 1
-        let readableHold: Duration = reduceMotion
-            ? .milliseconds(250)
-            : (isGroupedArrival ? .milliseconds(1_400) : .seconds(1))
-        let absorptionDuration: TimeInterval = isGroupedArrival ? 0.44 : 0.3
-
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
-            displayedBatch = batch
-            arrivalPhase = .presenting
-        }
-
-        guard await wait(for: readableHold) else { return }
-
-        withAnimation(reduceMotion ? nil : .smooth(duration: absorptionDuration)) {
-            arrivalPhase = .absorbing
-        }
-
-        guard await wait(
-            for: reduceMotion
-                ? .milliseconds(50)
-                : .milliseconds(Int(absorptionDuration * 1_000))
-        ) else { return }
-
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.36)) {
-            displayedBatch = nil
-            arrivalPhase = .idle
-        }
-        store.acknowledgeSurfacedBatch(batch.id)
-    }
-
-    private func wait(for duration: Duration) async -> Bool {
-        do {
-            try await Task.sleep(for: duration)
-            return !Task.isCancelled
-        } catch {
-            return false
-        }
-    }
-}
-
-private enum ArrivalPhase {
-    case idle
-    case presenting
-    case absorbing
 }
 
 private struct CollapsedContent: View {
     let items: [NudgeItem]
     @Bindable var store: NudgeStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if items.isEmpty {
@@ -202,9 +102,14 @@ private struct CollapsedContent: View {
                         )
                         .id(item.id)
                         .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
-                        .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                        .transition(.push(from: .bottom))
                     }
                 }
+                .padding(.vertical, NudgePanelLayout.surfaceVerticalPadding)
+                .animation(
+                    reduceMotion ? nil : .snappy(duration: 0.32),
+                    value: items.map(\.id)
+                )
             }
             .scrollIndicators(.never)
         }
@@ -251,6 +156,7 @@ private struct PeekContent: View {
 private struct ExpandedContent: View {
     let activeNudges: [NudgeItem]
     @Bindable var store: NudgeStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -276,6 +182,7 @@ private struct ExpandedContent: View {
                                 )
                                 .id(item.id)
                                 .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
+                                .transition(.push(from: .bottom))
                             }
 
                             if !store.futureNudges.isEmpty {
@@ -301,6 +208,10 @@ private struct ExpandedContent: View {
                                 }
                             }
                         }
+                        .animation(
+                            reduceMotion ? nil : .snappy(duration: 0.32),
+                            value: activeNudges.map(\.id)
+                        )
                     }
                     .scrollIndicators(.automatic)
                     .onChange(of: activeNudges.map(\.id)) { _, ids in
@@ -376,64 +287,19 @@ private struct ExpandedContent: View {
     }
 }
 
-private struct IncomingNudgeSurface: View {
-    let items: [NudgeItem]
-    let batch: NudgeStore.SurfacedBatch
-    @Bindable var store: NudgeStore
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if items.count > 1 {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
-
-                    Text(batch.headerTitle ?? "\(items.count) nudges arrived together")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-                }
-                .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
-                .frame(height: 30)
-            }
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(items) { item in
-                        NudgeListRow(item: item, store: store)
-                            .id(item.id)
-                            .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
-                    }
-                }
-            }
-            .scrollIndicators(.never)
-        }
-        .padding(.vertical, 6)
-        .contentShape(.rect)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            items.count == 1
-                ? "New nudge"
-                : (batch.headerTitle ?? "\(items.count) nudges arrived together")
-        )
-        .accessibilityIdentifier("incoming-nudge-batch-\(batch.id.uuidString)")
-    }
-}
-
 private struct NudgeListRow: View {
     let item: NudgeItem
     @Bindable var store: NudgeStore
     var displayedAt: Date? = nil
     var isMuted = false
     var showsExpandControl = false
+    @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
             timelineMarker
-                .frame(width: 66, alignment: .trailing)
-                .padding(.trailing, 7)
+                .frame(width: NudgePanelLayout.timelineMarkerWidth, alignment: .trailing)
+                .padding(.trailing, NudgePanelLayout.timelineMarkerSpacing)
 
             ZStack {
                 Circle()
@@ -449,10 +315,8 @@ private struct NudgeListRow: View {
             .frame(width: 20)
             .frame(maxHeight: .infinity)
 
-            Text(item.title)
-                .font(.body.weight(.medium))
+            titleLabel
                 .lineLimit(2)
-                .foregroundStyle(isMuted ? Color.secondary : Color.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 5)
 
@@ -481,7 +345,40 @@ private struct NudgeListRow: View {
             }
         }
         .frame(minHeight: 40)
+        .contentShape(.rect)
+        .background {
+            RoundedRectangle(cornerRadius: NudgePanelLayout.focusCornerRadius, style: .continuous)
+                .fill(Color.primary.opacity(isMuted && isHovered ? 0.055 : 0))
+        }
+        .onHover { hovering in
+            guard isMuted else { return }
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovered = hovering
+            }
+        }
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var titleLabel: some View {
+        if isMuted {
+            ZStack(alignment: .leading) {
+                Text(item.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .opacity(isHovered ? 0 : 1)
+
+                Text(item.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .opacity(isHovered ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            Text(item.title)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
+        }
     }
 
     private var completionButton: some View {

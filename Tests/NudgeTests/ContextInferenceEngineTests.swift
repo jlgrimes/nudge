@@ -62,14 +62,12 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.deferredCount, 0)
         XCTAssertTrue(store.activeNudges.contains(where: { $0.title == "Order coffee filters" }))
         XCTAssertNil(store.recapMessage)
-        XCTAssertEqual(store.surfacedBatch?.nudgeIDs.count, 1)
-        XCTAssertEqual(store.surfacedBatch?.headerTitle, "While you were away")
         XCTAssertEqual(store.activeContextLabel, "While you were away")
         XCTAssertEqual(store.presentation, .collapsed)
     }
 
     @MainActor
-    func testDayScenarioSurfacesItsFirstItemAsAnArrivalBatch() {
+    func testDayScenarioStartsWithOneSettledNudge() {
         let store = NudgeStore(seedDemoData: false)
 
         store.runDebugScenario(.day)
@@ -77,24 +75,24 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.count, 1)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeDebugScenario, .day)
-        XCTAssertEqual(store.surfacedBatch?.nudgeIDs, [store.activeNudges[0].id])
         store.resetDemo()
     }
 
     @MainActor
-    func testMultipleNotificationScenarioShowsOneAmbientList() {
+    func testMultipleNotificationScenarioAppendsArrivalsToOneAmbientList() async {
         let store = NudgeStore(seedDemoData: false)
 
         store.runDebugScenario(.multiple)
 
-        let surfacedIDs = Set(store.surfacedBatch?.nudgeIDs ?? [])
+        XCTAssertEqual(store.activeNudges.count, 2)
+        XCTAssertEqual(store.activeContextLabel, "Timeline · waiting for notifications")
+
+        try? await Task.sleep(for: .seconds(1.1))
 
         XCTAssertEqual(store.activeNudges.count, 6)
-        XCTAssertEqual(surfacedIDs.count, 4)
-        XCTAssertEqual(store.activeNudges.count { !surfacedIDs.contains($0.id) }, 2)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeContextLabel, "4 nudges arrived together")
-        XCTAssertNil(store.surfacedBatch?.headerTitle)
+        store.resetDemo()
     }
 
     @MainActor
@@ -108,16 +106,16 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testSingleScenarioRetimestampsAndSurfacesExistingNudgeAsABatch() async {
+    func testSingleScenarioStartsSettledThenSurfacesOneArrival() async {
         let store = NudgeStore(seedDemoData: false)
         store.runDebugScenario(.single)
 
-        XCTAssertNotEqual(store.activeNudges.last?.title, "Message Alex")
+        XCTAssertEqual(store.activeNudges.map(\.title), ["Review the launch notes"])
 
         try? await Task.sleep(for: .seconds(1.1))
 
+        XCTAssertEqual(store.activeNudges.count, 2)
         XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
-        XCTAssertEqual(store.surfacedBatch?.nudgeIDs, [store.activeNudges.last?.id].compactMap { $0 })
         store.resetDemo()
     }
 
@@ -130,26 +128,16 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertTrue(store.isFocusMode)
         XCTAssertEqual(store.deferredCount, 2)
         XCTAssertEqual(store.activeNudges.count, 3)
-        XCTAssertNil(store.surfacedBatch)
         XCTAssertEqual(store.activeContextLabel, "Focus mode · 2 nudges held quietly")
         XCTAssertEqual(store.presentation, .peek)
 
         store.setFocusMode(false)
 
-        let surfacedIDs = Set(store.surfacedBatch?.nudgeIDs ?? [])
-        let surfacedTitles = Set(
-            store.activeNudges
-                .filter { surfacedIDs.contains($0.id) }
-                .map(\.title)
-        )
-
         XCTAssertFalse(store.isFocusMode)
         XCTAssertEqual(store.deferredCount, 0)
         XCTAssertEqual(store.activeNudges.count, 5)
-        XCTAssertEqual(surfacedIDs.count, 2)
-        XCTAssertEqual(store.activeNudges.count { !surfacedIDs.contains($0.id) }, 3)
-        XCTAssertEqual(surfacedTitles, ["Message Alex about the launch", "Order coffee filters"])
-        XCTAssertEqual(store.surfacedBatch?.headerTitle, "While you were away")
+        XCTAssertTrue(store.activeNudges.contains { $0.title == "Message Alex about the launch" })
+        XCTAssertTrue(store.activeNudges.contains { $0.title == "Order coffee filters" })
         XCTAssertEqual(store.activeContextLabel, "While you were away")
         XCTAssertEqual(store.presentation, .collapsed)
         store.resetDemo()
@@ -164,21 +152,16 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
         XCTAssertNotNil(store.activeNudges.last?.surfacedAt)
         XCTAssertEqual(store.activeNudges.last?.invocation, .contextual(.messaging))
-        XCTAssertEqual(store.surfacedBatch?.nudgeIDs, [store.activeNudges.last?.id].compactMap { $0 })
     }
 
     @MainActor
-    func testAcknowledgingAnArrivalOnlyClearsTheMatchingBatch() {
+    func testDayScenarioStreamsTheNextNudgeIntoTheSameList() async {
         let store = NudgeStore(seedDemoData: false)
-        store.runDebugScenario(.multiple)
-        let batchID = store.surfacedBatch?.id
+        store.runDebugScenario(.day)
 
-        store.acknowledgeSurfacedBatch(UUID())
-        XCTAssertEqual(store.surfacedBatch?.id, batchID)
+        try? await Task.sleep(for: .milliseconds(750))
 
-        if let batchID {
-            store.acknowledgeSurfacedBatch(batchID)
-        }
-        XCTAssertNil(store.surfacedBatch)
+        XCTAssertEqual(store.activeNudges.count, 2)
+        store.resetDemo()
     }
 }
