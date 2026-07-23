@@ -44,7 +44,15 @@ final class NudgeStore {
     var fallbackDays = 2
     var isListening = false
     var activeDebugScenario: DebugScenario?
-    var emphasizedNudgeIDs: Set<UUID> = []
+    var emphasizedNudgeIDs: Set<UUID> = [] {
+        didSet { panelLayoutDidChange?() }
+    }
+    var surfacedBatchNudgeIDs: Set<UUID> = [] {
+        didSet { panelLayoutDidChange?() }
+    }
+    var emphasisBatchID: UUID? {
+        didSet { panelLayoutDidChange?() }
+    }
 
     @ObservationIgnored var presentationDidChange: (() -> Void)?
     @ObservationIgnored var panelLayoutDidChange: (() -> Void)?
@@ -236,6 +244,11 @@ final class NudgeStore {
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .completed
             emphasizedNudgeIDs.remove(id)
+            surfacedBatchNudgeIDs.remove(id)
+            if surfacedBatchNudgeIDs.count < 2 {
+                surfacedBatchNudgeIDs = []
+                emphasisBatchID = nil
+            }
         }
         if activeNudges.isEmpty {
             collapse()
@@ -247,6 +260,11 @@ final class NudgeStore {
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .dismissed
             emphasizedNudgeIDs.remove(id)
+            surfacedBatchNudgeIDs.remove(id)
+            if surfacedBatchNudgeIDs.count < 2 {
+                surfacedBatchNudgeIDs = []
+                emphasisBatchID = nil
+            }
         }
     }
 
@@ -286,6 +304,8 @@ final class NudgeStore {
         emphasisTask?.cancel()
         nudges = Self.demoNudges()
         emphasizedNudgeIDs = []
+        surfacedBatchNudgeIDs = []
+        emphasisBatchID = nil
         isFocusMode = false
         recapMessage = nil
         activeContextLabel = "Context ready"
@@ -411,6 +431,8 @@ final class NudgeStore {
         activeDebugScenario = scenario
         nudges = []
         emphasizedNudgeIDs = []
+        surfacedBatchNudgeIDs = []
+        emphasisBatchID = nil
         isFocusMode = false
         recapMessage = nil
         captureDraft = ""
@@ -425,7 +447,18 @@ final class NudgeStore {
         guard !ids.isEmpty else { return }
 
         emphasisTask?.cancel()
-        emphasizedNudgeIDs.formUnion(ids)
+        let incomingIDs = Set(ids)
+        let isBatch = incomingIDs.count > 1
+
+        if isBatch {
+            emphasizedNudgeIDs = []
+            surfacedBatchNudgeIDs = incomingIDs
+            emphasisBatchID = UUID()
+        } else {
+            surfacedBatchNudgeIDs = []
+            emphasisBatchID = nil
+            emphasizedNudgeIDs = incomingIDs
+        }
 
         emphasisTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(3))
@@ -433,6 +466,15 @@ final class NudgeStore {
 
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 emphasizedNudgeIDs = []
+                surfacedBatchNudgeIDs = []
+                emphasisBatchID = nil
+            } else if isBatch {
+                // The batch card is the emphasis. Its rows enter the timeline in
+                // their settled styling, without the legacy icon/text pulse.
+                withAnimation(.smooth(duration: 0.36)) {
+                    surfacedBatchNudgeIDs = []
+                    emphasisBatchID = nil
+                }
             } else {
                 withAnimation(.easeOut(duration: 0.4)) {
                     emphasizedNudgeIDs = []

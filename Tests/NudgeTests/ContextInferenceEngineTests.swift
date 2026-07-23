@@ -92,11 +92,13 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.count, 6)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeContextLabel, "4 nudges arrived together")
-        XCTAssertEqual(store.emphasizedNudgeIDs.count, 4)
+        XCTAssertTrue(store.emphasizedNudgeIDs.isEmpty)
+        XCTAssertEqual(store.surfacedBatchNudgeIDs.count, 4)
+        XCTAssertNotNil(store.emphasisBatchID)
         XCTAssertEqual(
             Set(
                 store.nudges
-                    .filter { store.emphasizedNudgeIDs.contains($0.id) }
+                    .filter { store.surfacedBatchNudgeIDs.contains($0.id) }
                     .map(\.title)
             ),
             Set([
@@ -146,6 +148,7 @@ final class ContextInferenceEngineTests: XCTestCase {
 
         XCTAssertEqual(store.activeNudges.count, 2)
         XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
+        XCTAssertNil(store.emphasisBatchID)
         store.resetDemo()
     }
 
@@ -170,15 +173,17 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertTrue(store.activeNudges.contains { $0.title == "Order coffee filters" })
         XCTAssertEqual(store.activeContextLabel, "While you were away")
         XCTAssertEqual(store.presentation, .collapsed)
-        let emphasizedTitles = Set(
+        let surfacedBatchTitles = Set(
             store.nudges
-                .filter { store.emphasizedNudgeIDs.contains($0.id) }
+                .filter { store.surfacedBatchNudgeIDs.contains($0.id) }
                 .map(\.title)
         )
         XCTAssertEqual(
-            emphasizedTitles,
+            surfacedBatchTitles,
             Set(["Message Alex about the launch", "Order coffee filters"])
         )
+        XCTAssertTrue(store.emphasizedNudgeIDs.isEmpty)
+        XCTAssertNotNil(store.emphasisBatchID)
         store.resetDemo()
     }
 
@@ -204,6 +209,8 @@ final class ContextInferenceEngineTests: XCTestCase {
         try? await Task.sleep(for: .seconds(1.1))
 
         XCTAssertEqual(store.activeNudges.count, 2)
+        XCTAssertEqual(store.emphasizedNudgeIDs.count, 1)
+        XCTAssertNil(store.emphasisBatchID)
         store.resetDemo()
     }
 }
