@@ -27,6 +27,26 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertTrue(result.triggers.first?.identifiers.contains("ebay.com") == true)
     }
 
+    func testRealSlackActivationCreatesAMessagingContext() {
+        let event = ContextEvent.activatedApplication(
+            bundleIdentifier: "com.tinyspeck.slackmacgap",
+            name: "Slack"
+        )
+
+        XCTAssertEqual(event?.kind, .messaging)
+        XCTAssertEqual(event?.identifiers, ["com.tinyspeck.slackmacgap"])
+        XCTAssertEqual(event?.label, "Slack is active")
+    }
+
+    func testUnrelatedApplicationDoesNotCreateAContext() {
+        let event = ContextEvent.activatedApplication(
+            bundleIdentifier: "com.apple.finder",
+            name: "Finder"
+        )
+
+        XCTAssertNil(event)
+    }
+
     @MainActor
     func testFocusDefersAndThenReleasesAContextualNudge() {
         let store = NudgeStore()

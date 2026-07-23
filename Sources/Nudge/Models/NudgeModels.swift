@@ -147,4 +147,23 @@ struct ContextEvent: Identifiable, Hashable, Sendable {
         label: "A meeting starts soon",
         identifiers: ["calendar.urgent"]
     )
+
+    static func activatedApplication(bundleIdentifier: String, name: String) -> ContextEvent? {
+        let messagingBundleIDs: Set<String> = [
+            "com.tinyspeck.slackmacgap",
+            "com.apple.MobileSMS",
+            "com.microsoft.teams2"
+        ]
+
+        if messagingBundleIDs.contains(bundleIdentifier) {
+            return ContextEvent(
+                id: "app:\(bundleIdentifier)",
+                kind: .messaging,
+                label: "\(name) is active",
+                identifiers: [bundleIdentifier]
+            )
+        }
+
+        return nil
+    }
 }
