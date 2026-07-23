@@ -15,6 +15,11 @@ enum NudgeStatus: String, Codable, Sendable {
     case expired
 }
 
+enum NudgeInvocation: Hashable, Sendable {
+    case temporal
+    case contextual(ContextKind)
+}
+
 enum TriggerSource: String, Codable, Sendable {
     case inferred
     case explicit
@@ -81,6 +86,7 @@ struct NudgeItem: Identifiable, Hashable, Sendable {
     let createdAt: Date
     var status: NudgeStatus
     var surfacedAt: Date?
+    var invocation: NudgeInvocation
     let primaryURL: URL?
     let canInterruptFocus: Bool
 
@@ -95,6 +101,7 @@ struct NudgeItem: Identifiable, Hashable, Sendable {
         createdAt: Date = .now,
         status: NudgeStatus = .pending,
         surfacedAt: Date? = nil,
+        invocation: NudgeInvocation = .temporal,
         primaryURL: URL? = nil,
         canInterruptFocus: Bool = false
     ) {
@@ -108,6 +115,7 @@ struct NudgeItem: Identifiable, Hashable, Sendable {
         self.createdAt = createdAt
         self.status = status
         self.surfacedAt = surfacedAt ?? (status == .active ? createdAt : nil)
+        self.invocation = invocation
         self.primaryURL = primaryURL
         self.canInterruptFocus = canInterruptFocus
     }

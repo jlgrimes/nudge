@@ -24,7 +24,7 @@ open output/Nudge.app
 
 - Use the always-visible scenario panel at the bottom of the screen:
   - **Day Stream** progressively adds six timestamped nudges and grows the ambient panel.
-  - **Single Notification** fires one compact contextual peek.
+  - **Single Notification** reactivates an existing timeline item, retimestamps it, moves it to the bottom, and briefly highlights it.
   - **Multiple Notifications** adds four simultaneous items to one expanded list.
   - **Focus Mode** lets an urgent item through, holds two normal items, then shows a recap.
 - Press `Option-Space` to open capture from any app.

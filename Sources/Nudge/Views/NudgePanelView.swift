@@ -24,13 +24,13 @@ struct NudgePanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(panelSurface)
         .clipShape(.rect(cornerRadius: cornerRadius))
-        .padding(4)
+        .padding(.horizontal, store.presentation == .collapsed ? 0 : 4)
+        .padding(.vertical, store.presentation == .collapsed ? 0 : 4)
         .animation(reduceMotion ? nil : .snappy(duration: 0.24), value: store.presentation)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: store.activeNudges.count)
     }
 
     private var cornerRadius: CGFloat {
-        store.presentation == .collapsed ? 28 : 16
+        store.presentation == .collapsed ? 14 : 16
     }
 
     private var panelSurface: some View {
@@ -47,28 +47,50 @@ private struct CollapsedContent: View {
     @Bindable var store: NudgeStore
 
     var body: some View {
-        Button(action: store.showExpanded) {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: store.isFocusMode ? "moon.fill" : "sparkles")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(store.isFocusMode ? Color.indigo : Color.accentColor)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if store.activeNudges.isEmpty {
+            HStack(spacing: 9) {
+                Button(action: store.showExpanded) {
+                    HStack(spacing: 9) {
+                        Image(systemName: store.deferredCount > 0 ? "moon.fill" : "checkmark.circle")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(store.deferredCount > 0 ? Color.indigo : Color.secondary)
+                            .frame(width: 20)
 
-                if store.bubbleCount > 0 {
-                    Text("\(store.bubbleCount)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(minWidth: 17, minHeight: 17)
-                        .background(store.isFocusMode ? Color.indigo : Color.accentColor, in: .circle)
-                        .padding(3)
-                        .transition(.scale.combined(with: .opacity))
+                        Text(
+                            store.deferredCount > 0
+                                ? "\(store.deferredCount) held during Focus"
+                                : "All Clear"
+                        )
+                        .font(.body.weight(.medium))
+
+                        Spacer()
+
+                        Image(systemName: "chevron.left")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.borderless)
             }
-            .contentShape(.rect)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(store.activeNudges) { item in
+                NudgeListRow(
+                    item: item,
+                    store: store,
+                    isMuted: item.id != store.activeNudges.last?.id,
+                    showsExpandControl: item.id == store.activeNudges.last?.id
+                )
+                .id(item.id)
+                .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 8))
+                .listRowBackground(Color.clear)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollIndicators(.never)
         }
-        .buttonStyle(.borderless)
-        .accessibilityLabel("Open Nudge, \(store.bubbleCount) items")
     }
 }
 
@@ -123,15 +145,43 @@ private struct ExpandedContent: View {
                     .padding(.bottom, 8)
             }
 
-            if store.activeNudges.isEmpty {
+            if store.activeNudges.isEmpty && store.futureNudges.isEmpty {
                 emptyState
             } else {
                 ScrollViewReader { proxy in
-                    List(store.activeNudges) { item in
-                        NudgeListRow(item: item, store: store)
-                            .id(item.id)
-                            .listRowInsets(.init(top: 9, leading: 12, bottom: 9, trailing: 12))
-                            .listRowBackground(Color.clear)
+                    List {
+                        Section {
+                            ForEach(store.activeNudges) { item in
+                                NudgeListRow(
+                                    item: item,
+                                    store: store,
+                                    isMuted: store.focusedNudgeID != nil && store.focusedNudgeID != item.id
+                                )
+                                .id(item.id)
+                                .listRowInsets(.init(top: 0, leading: 6, bottom: 0, trailing: 8))
+                                .listRowBackground(
+                                    store.focusedNudgeID == item.id
+                                        ? Color.accentColor.opacity(0.13)
+                                        : Color.clear
+                                )
+                            }
+                        }
+
+                        if !store.futureNudges.isEmpty {
+                            Section("Upcoming") {
+                                ForEach(store.futureNudges) { item in
+                                    NudgeListRow(
+                                        item: item,
+                                        store: store,
+                                        displayedAt: item.fallbackAt,
+                                        isMuted: true
+                                    )
+                                    .id(item.id)
+                                    .listRowInsets(.init(top: 0, leading: 6, bottom: 0, trailing: 8))
+                                    .listRowBackground(Color.clear)
+                                }
+                            }
+                        }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
@@ -151,14 +201,8 @@ private struct ExpandedContent: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Nudge")
-                    .font(.headline)
-                Text(store.activeContextLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Text("Nudge")
+                .font(.headline)
 
             Spacer()
 
@@ -210,7 +254,7 @@ private struct ExpandedContent: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .overlay(alignment: .top) { Divider() }
     }
 }
@@ -218,43 +262,36 @@ private struct ExpandedContent: View {
 private struct NudgeListRow: View {
     let item: NudgeItem
     @Bindable var store: NudgeStore
+    var displayedAt: Date? = nil
+    var isMuted = false
+    var showsExpandControl = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button {
-                store.complete(item.id)
-            } label: {
-                Image(systemName: leadingSymbol)
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.body)
-                    .foregroundStyle(priorityColor)
-                    .frame(width: 20, height: 20)
+        HStack(alignment: .center, spacing: 0) {
+            timelineMarker
+                .frame(width: 66, alignment: .trailing)
+
+            ZStack {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(0.7))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+
+                Circle()
+                    .fill(.regularMaterial)
+                    .frame(width: 18, height: 18)
+
+                completionButton
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(item.priority == .informational ? "Information" : "Complete")
+            .frame(width: 20)
+            .frame(maxHeight: .infinity)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.body.weight(.medium))
-                    .lineLimit(2)
-
-                Text(item.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-
-                HStack(spacing: 5) {
-                    Text(item.timelineDate.formatted(date: .omitted, time: .shortened))
-                        .monospacedDigit()
-                    Text("·")
-                    Label(item.contextLabel, systemImage: item.triggers.first?.kind.symbol ?? "sparkles")
-                        .labelStyle(.titleAndIcon)
-                }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            }
-
-            Spacer(minLength: 6)
+            Text(item.title)
+                .font(.body.weight(.medium))
+                .lineLimit(2)
+                .foregroundStyle(isMuted ? Color.secondary : Color.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 5)
 
             if let url = item.primaryURL {
                 Button {
@@ -265,23 +302,67 @@ private struct NudgeListRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Open Link")
+                .padding(.leading, 5)
+            }
+
+            if showsExpandControl {
+                Button(action: store.showExpanded) {
+                    Image(systemName: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .help("Show Upcoming and New Nudge")
+                .padding(.leading, 5)
             }
         }
+        .frame(minHeight: 40)
+        .accessibilityElement(children: .contain)
     }
 
-    private var leadingSymbol: String {
-        switch item.priority {
-        case .urgent: "exclamationmark.circle.fill"
-        case .actionable: "circle"
-        case .informational: "info.circle"
+    private var completionButton: some View {
+        Button {
+            store.complete(item.id)
+        } label: {
+            Image(systemName: "circle")
+                .symbolRenderingMode(.hierarchical)
+                .font(.body)
+                .foregroundStyle(priorityColor)
+                .frame(width: 20, height: 20)
+                .symbolEffect(.bounce, value: store.focusedNudgeID == item.id)
+        }
+        .buttonStyle(.borderless)
+        .help("Mark Complete")
+    }
+
+    @ViewBuilder
+    private var timelineMarker: some View {
+        switch item.invocation {
+        case .temporal:
+            Text((displayedAt ?? item.timelineDate).formatted(date: .omitted, time: .shortened))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        case .contextual(let context):
+            HStack(spacing: 3) {
+                Image(systemName: context.symbol)
+                    .symbolRenderingMode(.hierarchical)
+
+                Text("Opened")
+            }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(isMuted ? Color.secondary : Color.accentColor)
+                .help("Triggered by \(context.label.lowercased())")
         }
     }
 
     private var priorityColor: Color {
+        if isMuted { return .secondary }
+
         switch item.priority {
-        case .urgent: .orange
-        case .actionable: .accentColor
-        case .informational: .secondary
+        case .urgent: return .orange
+        case .actionable: return .accentColor
+        case .informational: return .secondary
         }
     }
 }

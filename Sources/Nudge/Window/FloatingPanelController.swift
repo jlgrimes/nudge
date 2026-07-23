@@ -38,6 +38,9 @@ final class FloatingPanelController {
         store.panelLayoutDidChange = { [weak self] in
             self?.updatePresentation()
         }
+        store.debugScenarioDidRun = { [weak self] in
+            self?.focusPanel()
+        }
 
         position(size: initialSize, animated: false)
         panel.orderFrontRegardless()
@@ -46,6 +49,10 @@ final class FloatingPanelController {
     func show() {
         updatePresentation()
         panel.orderFrontRegardless()
+    }
+
+    private func focusPanel() {
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func updatePresentation() {
@@ -88,15 +95,18 @@ final class FloatingPanelController {
     private static func size(for store: NudgeStore) -> NSSize {
         switch store.presentation {
         case .collapsed:
-            return NSSize(width: 64, height: 64)
+            let contentHeight = CGFloat(store.activeNudges.count * 40)
+            return NSSize(width: 372, height: min(540, max(56, contentHeight)))
         case .peek:
             return NSSize(width: 360, height: 86)
         case .expanded:
             let recapHeight: CGFloat = store.recapMessage == nil ? 0 : 64
-            let contentHeight = CGFloat(112 + store.activeNudges.count * 70) + recapHeight
-            return NSSize(width: 372, height: min(540, max(200, contentHeight)))
+            let upcomingHeaderHeight: CGFloat = store.futureNudges.isEmpty ? 0 : 26
+            let visibleItemCount = store.activeNudges.count + store.futureNudges.count
+            let contentHeight = CGFloat(146 + visibleItemCount * 40) + recapHeight + upcomingHeaderHeight
+            return NSSize(width: 372, height: min(620, max(180, contentHeight)))
         case .capture:
-            return NSSize(width: 420, height: store.capturePreview == nil ? 154 : 220)
+            return NSSize(width: 420, height: store.capturePreview == nil ? 122 : 194)
         }
     }
 }

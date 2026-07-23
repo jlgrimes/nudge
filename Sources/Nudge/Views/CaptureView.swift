@@ -12,10 +12,6 @@ struct CaptureView: View {
             if let preview = store.capturePreview {
                 confirmation(preview)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else {
-                Text("Describe the intention. Nudge infers where it will be useful.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(14)
