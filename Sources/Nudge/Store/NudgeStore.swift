@@ -6,6 +6,16 @@ import SwiftUI
 @MainActor
 @Observable
 final class NudgeStore {
+    struct SurfacedBatch: Identifiable, Equatable, Sendable {
+        let id: UUID
+        let nudgeIDs: [UUID]
+
+        init(id: UUID = UUID(), nudgeIDs: [UUID]) {
+            self.id = id
+            self.nudgeIDs = nudgeIDs
+        }
+    }
+
     enum Presentation: Equatable {
         case collapsed
         case peek
@@ -41,6 +51,9 @@ final class NudgeStore {
     var isListening = false
     var activeDebugScenario: DebugScenario?
     var focusedNudgeID: UUID?
+    var surfacedBatch: SurfacedBatch? {
+        didSet { panelLayoutDidChange?() }
+    }
 
     @ObservationIgnored var presentationDidChange: (() -> Void)?
     @ObservationIgnored var panelLayoutDidChange: (() -> Void)?
@@ -170,10 +183,13 @@ final class NudgeStore {
             nudges.first(where: { $0.id == id })?.status == .active
         }) else { return }
 
+        let activeMatchingIDs = matchingIDs.filter { id in
+            nudges.first(where: { $0.id == id })?.status == .active
+        }
+        publishSurfaceBatch(activeMatchingIDs)
+
         if wasExpanded {
-            let latestActiveID = matchingIDs.last { id in
-                nudges.first(where: { $0.id == id })?.status == .active
-            }
+            let latestActiveID = activeMatchingIDs.last
             focusAttention(on: latestActiveID)
             panelLayoutDidChange?()
         } else {
@@ -224,6 +240,7 @@ final class NudgeStore {
             }
             recapMessage = shortRecap(for: titles)
             activeContextLabel = "Focus complete"
+            publishSurfaceBatch(deferredIDs)
             presentation = .expanded
         } else {
             activeContextLabel = "Context ready"
@@ -234,6 +251,7 @@ final class NudgeStore {
         demoTask?.cancel()
         peekTask?.cancel()
         attentionTask?.cancel()
+        surfacedBatch = nil
         nudges = Self.demoNudges()
         isFocusMode = false
         recapMessage = nil
@@ -287,6 +305,7 @@ final class NudgeStore {
                     try? await Task.sleep(for: .milliseconds(650))
                     guard !Task.isCancelled else { return }
                     nudges.append(item)
+                    publishSurfaceBatch([item.id])
                     activeContextLabel = "Today · \(nudges.count) unresolved nudges"
                 }
             }
@@ -306,12 +325,13 @@ final class NudgeStore {
                     nudges[index].invocation = .contextual(.messaging)
                 }
                 activeContextLabel = "Slack is active · nudge refreshed"
-                focusAttention(on: id)
+                publishSurfaceBatch([id])
             }
 
         case .multiple:
             nudges = Self.multipleScenarioNudges()
             activeContextLabel = "\(nudges.count) nudges arrived together"
+            publishSurfaceBatch(nudges.map(\.id))
             presentation = .collapsed
 
         case .focus:
@@ -344,6 +364,7 @@ final class NudgeStore {
         demoTask?.cancel()
         peekTask?.cancel()
         attentionTask?.cancel()
+        surfacedBatch = nil
         activeDebugScenario = scenario
         nudges = []
         isFocusMode = false
@@ -353,6 +374,16 @@ final class NudgeStore {
         focusedNudgeID = nil
         activeContextLabel = "Context ready"
         presentation = .collapsed
+    }
+
+    func acknowledgeSurfacedBatch(_ id: UUID) {
+        guard surfacedBatch?.id == id else { return }
+        surfacedBatch = nil
+    }
+
+    private func publishSurfaceBatch(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        surfacedBatch = SurfacedBatch(nudgeIDs: ids)
     }
 
     private func shortRecap(for titles: [String]) -> String {

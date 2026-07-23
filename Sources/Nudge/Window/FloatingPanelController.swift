@@ -8,6 +8,39 @@ final class NudgePanel: NSPanel {
 }
 
 @MainActor
+private final class GlassViewportHostingView<Content: View>: NSView {
+    private let hostingView: NSHostingView<Content>
+    private let interactionInset: CGFloat
+
+    init(rootView: Content, interactionInset: CGFloat) {
+        self.hostingView = NSHostingView(rootView: rootView)
+        self.interactionInset = interactionInset
+        super.init(frame: .zero)
+
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostingView)
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.insetBy(dx: interactionInset, dy: interactionInset).contains(point) else {
+            return nil
+        }
+        return super.hitTest(point)
+    }
+}
+
+@MainActor
 final class FloatingPanelController {
     private let panel: NudgePanel
     private let store: NudgeStore
@@ -30,7 +63,10 @@ final class FloatingPanelController {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.contentView = NSHostingView(rootView: NudgePanelView(store: store))
+        panel.contentView = GlassViewportHostingView(
+            rootView: NudgePanelView(store: store),
+            interactionInset: NudgePanelLayout.glassViewportInset
+        )
 
         store.presentationDidChange = { [weak self] in
             self?.updatePresentation()
@@ -73,17 +109,18 @@ final class FloatingPanelController {
         let pointerScreen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
         guard let screen = panel.screen ?? pointerScreen ?? NSScreen.main ?? NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
-        let rightMargin: CGFloat = 18
-        let topMargin: CGFloat = 54
+        let rightMargin = NudgePanelLayout.surfaceRightMargin - NudgePanelLayout.glassViewportInset
+        let topMargin = NudgePanelLayout.surfaceTopMargin - NudgePanelLayout.glassViewportInset
+        let bottomMargin = 18 - NudgePanelLayout.glassViewportInset
         let origin = NSPoint(
             x: visible.maxX - size.width - rightMargin,
-            y: max(visible.minY + 18, visible.maxY - topMargin - size.height)
+            y: max(visible.minY + bottomMargin, visible.maxY - topMargin - size.height)
         )
         let frame = NSRect(origin: origin, size: size)
 
-        if animated {
+        if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.24
+                context.duration = 0.36
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 panel.animator().setFrame(frame, display: true)
             }
@@ -93,20 +130,39 @@ final class FloatingPanelController {
     }
 
     private static func size(for store: NudgeStore) -> NSSize {
+        let incomingIDs = Set(store.surfacedBatch?.nudgeIDs ?? [])
+        let incomingCount = store.activeNudges.count { incomingIDs.contains($0.id) }
+        let settledActiveCount = store.activeNudges.count - incomingCount
+        let batchHeaderHeight: CGFloat = incomingCount > 1 ? 30 : 0
+        let incomingHeight = incomingCount > 0
+            ? CGFloat(incomingCount * 40) + batchHeaderHeight + 22
+            : 0
+        let glassInsets = NudgePanelLayout.glassViewportInset * 2
+        let standardPanelWidth = NudgePanelLayout.standardContentWidth + glassInsets
+        let capturePanelWidth = NudgePanelLayout.captureContentWidth + glassInsets
+
         switch store.presentation {
         case .collapsed:
-            let contentHeight = CGFloat(store.activeNudges.count * 40)
-            return NSSize(width: 372, height: min(540, max(56, contentHeight)))
+            let settledHeight = max(56, CGFloat(settledActiveCount * 40))
+            return NSSize(
+                width: standardPanelWidth,
+                height: min(608, settledHeight + incomingHeight) + glassInsets
+            )
         case .peek:
-            return NSSize(width: 360, height: 86)
+            return NSSize(
+                width: standardPanelWidth,
+                height: min(608, 86 + incomingHeight) + glassInsets
+            )
         case .expanded:
             let recapHeight: CGFloat = store.recapMessage == nil ? 0 : 64
             let upcomingHeaderHeight: CGFloat = store.futureNudges.isEmpty ? 0 : 26
-            let visibleItemCount = store.activeNudges.count + store.futureNudges.count
-            let contentHeight = CGFloat(146 + visibleItemCount * 40) + recapHeight + upcomingHeaderHeight
-            return NSSize(width: 372, height: min(620, max(180, contentHeight)))
+            let settledItemCount = settledActiveCount + store.futureNudges.count
+            let settledHeight = CGFloat(146 + settledItemCount * 40) + recapHeight + upcomingHeaderHeight
+            let contentHeight = max(180, settledHeight) + incomingHeight
+            return NSSize(width: standardPanelWidth, height: min(638, contentHeight) + glassInsets)
         case .capture:
-            return NSSize(width: 420, height: store.capturePreview == nil ? 122 : 194)
+            let contentHeight: CGFloat = store.capturePreview == nil ? 122 : 194
+            return NSSize(width: capturePanelWidth, height: contentHeight + glassInsets)
         }
     }
 }

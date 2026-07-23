@@ -14,7 +14,8 @@ struct CaptureView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .padding(14)
+        .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
+        .padding(.vertical, 14)
         .animation(.snappy(duration: 0.22), value: store.capturePreview?.id)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {

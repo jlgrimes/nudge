@@ -62,6 +62,7 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.deferredCount, 0)
         XCTAssertTrue(store.activeNudges.contains(where: { $0.title == "Order coffee filters" }))
         XCTAssertNotNil(store.recapMessage)
+        XCTAssertEqual(store.surfacedBatch?.nudgeIDs.count, 1)
     }
 
     @MainActor
@@ -85,6 +86,7 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.count, 4)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeContextLabel, "4 nudges arrived together")
+        XCTAssertEqual(Set(store.surfacedBatch?.nudgeIDs ?? []), Set(store.activeNudges.map(\.id)))
     }
 
     @MainActor
@@ -98,7 +100,7 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testSingleScenarioRetimestampsAndMovesExistingNudgeToBottom() async {
+    func testSingleScenarioRetimestampsAndSurfacesExistingNudgeAsABatch() async {
         let store = NudgeStore(seedDemoData: false)
         store.runDebugScenario(.single)
 
@@ -107,7 +109,7 @@ final class ContextInferenceEngineTests: XCTestCase {
         try? await Task.sleep(for: .seconds(1.1))
 
         XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
-        XCTAssertEqual(store.focusedNudgeID, store.activeNudges.last?.id)
+        XCTAssertEqual(store.surfacedBatch?.nudgeIDs, [store.activeNudges.last?.id].compactMap { $0 })
         store.resetDemo()
     }
 
@@ -133,5 +135,21 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
         XCTAssertNotNil(store.activeNudges.last?.surfacedAt)
         XCTAssertEqual(store.activeNudges.last?.invocation, .contextual(.messaging))
+        XCTAssertEqual(store.surfacedBatch?.nudgeIDs, [store.activeNudges.last?.id].compactMap { $0 })
+    }
+
+    @MainActor
+    func testAcknowledgingAnArrivalOnlyClearsTheMatchingBatch() {
+        let store = NudgeStore(seedDemoData: false)
+        store.runDebugScenario(.multiple)
+        let batchID = store.surfacedBatch?.id
+
+        store.acknowledgeSurfacedBatch(UUID())
+        XCTAssertEqual(store.surfacedBatch?.id, batchID)
+
+        if let batchID {
+            store.acknowledgeSurfacedBatch(batchID)
+        }
+        XCTAssertNil(store.surfacedBatch)
     }
 }
