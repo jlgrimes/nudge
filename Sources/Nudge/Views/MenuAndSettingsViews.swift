@@ -24,7 +24,7 @@ struct NudgeMenuView: View {
             Button("Show Nudge", systemImage: "rectangle.on.rectangle") {
                 store.showExpanded()
             }
-            Button("Add a nudge…", systemImage: "plus") {
+            Button("Remind me to", systemImage: "plus") {
                 store.showCapture()
             }
             Button(

@@ -96,7 +96,7 @@ final class FloatingPanelController {
         position(size: targetSize, animated: true)
         panel.contentView?.needsDisplay = true
 
-        if store.presentation == .capture {
+        if store.presentation == .capture || store.isQuickAddExpanded {
             NSApp.activate(ignoringOtherApps: true)
             panel.makeKeyAndOrderFront(nil)
         } else {
@@ -132,6 +132,7 @@ final class FloatingPanelController {
     private static func size(for store: NudgeStore) -> NSSize {
         let activeCount = store.activeNudges.count
         let glassInsets = NudgePanelLayout.glassViewportInset * 2
+        let quickAddSpace = NudgePanelLayout.quickAddHeight + NudgePanelLayout.glassSurfaceSpacing
         let standardPanelWidth = NudgePanelLayout.standardContentWidth + glassInsets
         let capturePanelWidth = NudgePanelLayout.captureContentWidth + glassInsets
 
@@ -145,12 +146,12 @@ final class FloatingPanelController {
             )
             return NSSize(
                 width: standardPanelWidth,
-                height: min(608, contentHeight) + glassInsets
+                height: min(608, contentHeight) + quickAddSpace + glassInsets
             )
         case .peek:
             return NSSize(
                 width: standardPanelWidth,
-                height: 86 + glassInsets
+                height: 86 + quickAddSpace + glassInsets
             )
         case .expanded:
             let recapHeight: CGFloat = store.recapMessage == nil ? 0 : 64
@@ -158,7 +159,10 @@ final class FloatingPanelController {
             let itemCount = activeCount + store.futureNudges.count
             let listHeight = CGFloat(146 + itemCount * 40) + recapHeight + upcomingHeaderHeight
             let contentHeight = max(180, listHeight)
-            return NSSize(width: standardPanelWidth, height: min(638, contentHeight) + glassInsets)
+            return NSSize(
+                width: standardPanelWidth,
+                height: min(638, contentHeight) + quickAddSpace + glassInsets
+            )
         case .capture:
             let contentHeight: CGFloat = store.capturePreview == nil ? 122 : 194
             return NSSize(width: capturePanelWidth, height: contentHeight + glassInsets)

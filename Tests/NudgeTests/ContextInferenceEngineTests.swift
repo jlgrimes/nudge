@@ -92,6 +92,20 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.count, 6)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeContextLabel, "4 nudges arrived together")
+        XCTAssertEqual(store.emphasizedNudgeIDs.count, 4)
+        XCTAssertEqual(
+            Set(
+                store.nudges
+                    .filter { store.emphasizedNudgeIDs.contains($0.id) }
+                    .map(\.title)
+            ),
+            Set([
+                "Join the design review",
+                "Send the prototype link to Maya",
+                "Order coffee filters",
+                "Your afternoon is meeting-free"
+            ])
+        )
         store.resetDemo()
     }
 
@@ -103,6 +117,22 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.futureNudges.count, 3)
         XCTAssertTrue(store.activeNudges.allSatisfy { $0.status == .active })
         XCTAssertTrue(store.futureNudges.allSatisfy { $0.status == .pending })
+    }
+
+    @MainActor
+    func testQuickAddCreatesAnActiveTimelineNudgeAndCollapsesTheInput() {
+        let store = NudgeStore(seedDemoData: false)
+        store.showQuickAdd()
+        store.quickAddDraft = "Review the launch checklist"
+
+        store.createNudgeFromQuickAdd()
+
+        XCTAssertFalse(store.isQuickAddExpanded)
+        XCTAssertTrue(store.quickAddDraft.isEmpty)
+        XCTAssertEqual(store.activeNudges.count, 1)
+        XCTAssertEqual(store.activeNudges.first?.status, .active)
+        XCTAssertEqual(store.activeNudges.first?.invocation, .temporal)
+        XCTAssertNotNil(store.activeNudges.first?.surfacedAt)
     }
 
     @MainActor
@@ -140,6 +170,15 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertTrue(store.activeNudges.contains { $0.title == "Order coffee filters" })
         XCTAssertEqual(store.activeContextLabel, "While you were away")
         XCTAssertEqual(store.presentation, .collapsed)
+        let emphasizedTitles = Set(
+            store.nudges
+                .filter { store.emphasizedNudgeIDs.contains($0.id) }
+                .map(\.title)
+        )
+        XCTAssertEqual(
+            emphasizedTitles,
+            Set(["Message Alex about the launch", "Order coffee filters"])
+        )
         store.resetDemo()
     }
 
@@ -152,6 +191,9 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.last?.title, "Message Alex")
         XCTAssertNotNil(store.activeNudges.last?.surfacedAt)
         XCTAssertEqual(store.activeNudges.last?.invocation, .contextual(.messaging))
+        XCTAssertTrue(
+            store.activeNudges.last.map { store.emphasizedNudgeIDs.contains($0.id) } == true
+        )
     }
 
     @MainActor

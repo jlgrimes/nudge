@@ -10,6 +10,8 @@ enum NudgePanelLayout {
     static let focusCornerRadius: CGFloat = 12
     static let surfaceTopPadding: CGFloat = 6
     static let surfaceBottomPadding: CGFloat = 4
+    static let glassSurfaceSpacing: CGFloat = 10
+    static let quickAddHeight: CGFloat = 44
     static let rowOuterHorizontalPadding: CGFloat = 8
     static let rowInnerHorizontalPadding: CGFloat = 12
     static let timelineMarkerWidth: CGFloat = 72
@@ -24,20 +26,38 @@ struct NudgePanelView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            primaryContent
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: 44,
-                    maxHeight: proxy.size.height
-                )
-                .glassEffect(
-                    .regular,
-                    in: .rect(cornerRadius: NudgePanelLayout.surfaceCornerRadius)
-                )
+            let showsQuickAdd = store.presentation != .capture
+            let quickAddSpace = showsQuickAdd
+                ? NudgePanelLayout.quickAddHeight + NudgePanelLayout.glassSurfaceSpacing
+                : 0
+
+            GlassEffectContainer(spacing: NudgePanelLayout.glassSurfaceSpacing) {
+                VStack(alignment: .trailing, spacing: NudgePanelLayout.glassSurfaceSpacing) {
+                    primaryContent
+                        .frame(maxWidth: .infinity)
+                        .frame(height: max(44, proxy.size.height - quickAddSpace))
+                        .glassEffect(
+                            .regular,
+                            in: .rect(cornerRadius: NudgePanelLayout.surfaceCornerRadius)
+                        )
+
+                    if showsQuickAdd {
+                        QuickAddGlassControl(store: store)
+                            .frame(
+                                width: store.isQuickAddExpanded
+                                    ? proxy.size.width
+                                    : NudgePanelLayout.quickAddHeight,
+                                height: NudgePanelLayout.quickAddHeight
+                            )
+                            .glassEffect(.regular, in: .capsule)
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
         }
         .padding(NudgePanelLayout.glassViewportInset)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.24), value: store.presentation)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: store.presentation)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: store.isQuickAddExpanded)
     }
 
     @ViewBuilder
@@ -56,6 +76,59 @@ struct NudgePanelView: View {
         }
         .transition(.opacity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct QuickAddGlassControl: View {
+    @Bindable var store: NudgeStore
+    @FocusState private var isInputFocused: Bool
+
+    var body: some View {
+        Group {
+            if store.isQuickAddExpanded {
+                HStack(spacing: 9) {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.secondary)
+
+                    TextField("Remind me to", text: $store.quickAddDraft)
+                        .textFieldStyle(.plain)
+                        .focused($isInputFocused)
+                        .onSubmit(store.createNudgeFromQuickAdd)
+
+                    Button(action: store.cancelQuickAdd) {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel")
+                }
+                .padding(.horizontal, 13)
+            } else {
+                Button(action: store.showQuickAdd) {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Add Nudge")
+                .accessibilityLabel("Add Nudge")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: store.isQuickAddExpanded) { _, isExpanded in
+            guard isExpanded else {
+                isInputFocused = false
+                return
+            }
+            DispatchQueue.main.async {
+                isInputFocused = true
+            }
+        }
+        .onExitCommand(perform: store.cancelQuickAdd)
     }
 }
 
@@ -100,23 +173,27 @@ private struct CollapsedContent: View {
                         NudgeListRow(
                             item: item,
                             store: store,
-                            isMuted: true,
+                            isMuted: item.id != items.last?.id,
                             showsExpandControl: item.id == items.last?.id
                         )
                         .id(item.id)
                         .padding(.horizontal, NudgePanelLayout.rowOuterHorizontalPadding)
-                        .transition(.push(from: .bottom))
+                        .transition(rowTransition)
                     }
                 }
                 .padding(.top, NudgePanelLayout.surfaceTopPadding)
                 .padding(.bottom, NudgePanelLayout.surfaceBottomPadding)
                 .animation(
-                    reduceMotion ? nil : .snappy(duration: 0.32),
+                    reduceMotion ? nil : .smooth(duration: 0.28),
                     value: items.map(\.id)
                 )
             }
             .scrollIndicators(.never)
         }
+    }
+
+    private var rowTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
     }
 }
 
@@ -182,11 +259,11 @@ private struct ExpandedContent: View {
                                 NudgeListRow(
                                     item: item,
                                     store: store,
-                                    isMuted: true
+                                    isMuted: item.id != activeNudges.last?.id
                                 )
                                 .id(item.id)
                                 .padding(.horizontal, NudgePanelLayout.rowOuterHorizontalPadding)
-                                .transition(.push(from: .bottom))
+                                .transition(rowTransition)
                             }
 
                             if !store.futureNudges.isEmpty {
@@ -213,22 +290,25 @@ private struct ExpandedContent: View {
                             }
                         }
                         .animation(
-                            reduceMotion ? nil : .snappy(duration: 0.32),
+                            reduceMotion ? nil : .smooth(duration: 0.28),
                             value: activeNudges.map(\.id)
                         )
                     }
                     .scrollIndicators(.automatic)
                     .onChange(of: activeNudges.map(\.id)) { _, ids in
                         guard let latestID = ids.last else { return }
-                        withAnimation(.snappy(duration: 0.3)) {
+                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.28)) {
                             proxy.scrollTo(latestID, anchor: .bottom)
                         }
                     }
                 }
             }
 
-            footer
         }
+    }
+
+    private var rowTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
     }
 
     private var header: some View {
@@ -273,22 +353,6 @@ private struct ExpandedContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var footer: some View {
-        HStack {
-            Button("New Nudge", systemImage: "plus", action: store.showCapture)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-
-            Spacer()
-
-            Text("⌥ Space")
-                .font(.caption.monospaced())
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
-        .padding(.vertical, 8)
-        .overlay(alignment: .top) { Divider() }
-    }
 }
 
 private struct NudgeListRow: View {
@@ -300,18 +364,23 @@ private struct NudgeListRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     @State private var isCompleting = false
+    @State private var emphasisPulse = 0
 
     var body: some View {
         ZStack(alignment: .trailing) {
             Button(action: beginCompletion) {
                 HStack(alignment: .center, spacing: 0) {
                     timelineMarker
-                        .frame(width: NudgePanelLayout.timelineMarkerWidth, alignment: .leading)
+                        .frame(
+                            width: NudgePanelLayout.timelineMarkerWidth,
+                            height: 40,
+                            alignment: .center
+                        )
                         .padding(.trailing, NudgePanelLayout.timelineMarkerSpacing)
 
                     titleLabel
                         .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
 
                     if trailingActionWidth > 0 {
                         Color.clear
@@ -333,34 +402,39 @@ private struct NudgeListRow: View {
         .contentShape(.rect)
         .background {
             RoundedRectangle(cornerRadius: NudgePanelLayout.focusCornerRadius, style: .continuous)
-                .fill(Color.primary.opacity(isHovered || isCompleting ? 0.055 : 0))
+                .fill(rowBackgroundColor)
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: isEmphasized)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.16)) {
                 isHovered = hovering
             }
+        }
+        .onAppear(perform: pulseIfNeeded)
+        .onChange(of: isEmphasized) { _, emphasized in
+            if emphasized { pulseIfNeeded() }
         }
     }
 
     @ViewBuilder
     private var titleLabel: some View {
         Group {
-            if isMuted {
+            if isMuted && !isEmphasized {
                 ZStack(alignment: .leading) {
                     Text(item.title)
-                        .font(.body.weight(.medium))
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .opacity(isHovered ? 0 : 1)
 
                     Text(item.title)
-                        .font(.body.weight(.medium))
+                        .font(.body)
                         .foregroundStyle(.primary)
                         .opacity(isHovered ? 1 : 0)
                         .accessibilityHidden(true)
                 }
             } else {
                 Text(item.title)
-                    .font(.body.weight(.medium))
+                    .font(.body)
                     .foregroundStyle(.primary)
             }
         }
@@ -428,27 +502,44 @@ private struct NudgeListRow: View {
     }
 
     private var timelineMarker: some View {
-        HStack(spacing: 7) {
+        HStack(alignment: .center, spacing: 7) {
             Group {
                 switch item.invocation {
                 case .temporal:
                     Image(systemName: "clock")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(
+                            isEmphasized ? Color.primary : Color.primary.opacity(0.35)
+                        )
                 case .contextual(let context):
                     Image(systemName: context.symbol)
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(isMuted ? Color.secondary : Color.accentColor)
+                        .foregroundStyle(isEmphasized ? Color.primary : Color.secondary)
                         .help("Triggered by \(context.label.lowercased())")
                 }
             }
             .frame(width: 13, alignment: .leading)
+            .symbolEffect(.pulse.wholeSymbol, value: emphasisPulse)
+            .symbolEffectsRemoved(reduceMotion)
 
             Text((displayedAt ?? item.timelineDate).formatted(date: .omitted, time: .shortened))
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isEmphasized ? Color.primary : Color.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .font(.caption2.weight(.medium))
+    }
+
+    private var rowBackgroundColor: Color {
+        return Color.primary.opacity(isHovered || isCompleting ? 0.055 : 0)
+    }
+
+    private var isEmphasized: Bool {
+        store.emphasizedNudgeIDs.contains(item.id)
+    }
+
+    private func pulseIfNeeded() {
+        guard isEmphasized, !reduceMotion else { return }
+        emphasisPulse += 1
     }
 
 }

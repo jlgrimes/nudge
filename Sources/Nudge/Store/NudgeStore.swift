@@ -37,15 +37,21 @@ final class NudgeStore {
     var capturePreview: NudgeItem? {
         didSet { panelLayoutDidChange?() }
     }
+    var quickAddDraft = ""
+    var isQuickAddExpanded = false {
+        didSet { presentationDidChange?() }
+    }
     var fallbackDays = 2
     var isListening = false
     var activeDebugScenario: DebugScenario?
+    var emphasizedNudgeIDs: Set<UUID> = []
 
     @ObservationIgnored var presentationDidChange: (() -> Void)?
     @ObservationIgnored var panelLayoutDidChange: (() -> Void)?
     @ObservationIgnored var debugScenarioDidRun: (() -> Void)?
     @ObservationIgnored private var peekTask: Task<Void, Never>?
     @ObservationIgnored private var demoTask: Task<Void, Never>?
+    @ObservationIgnored private var emphasisTask: Task<Void, Never>?
 
     init(seedDemoData: Bool = true) {
         self.nudges = seedDemoData ? Self.demoNudges() : []
@@ -101,10 +107,53 @@ final class NudgeStore {
 
     func showCapture() {
         peekTask?.cancel()
+        isQuickAddExpanded = false
+        quickAddDraft = ""
         captureDraft = ""
         capturePreview = nil
         isListening = false
         presentation = .capture
+    }
+
+    func showQuickAdd() {
+        peekTask?.cancel()
+        quickAddDraft = ""
+        isQuickAddExpanded = true
+    }
+
+    func cancelQuickAdd() {
+        quickAddDraft = ""
+        isQuickAddExpanded = false
+    }
+
+    func createNudgeFromQuickAdd() {
+        let request = quickAddDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty else { return }
+
+        let inference = ContextInferenceEngine.infer(from: request)
+        let item = NudgeItem(
+            originalRequest: request,
+            title: inference.title,
+            detail: inference.detail,
+            priority: inference.priority,
+            triggers: inference.triggers,
+            fallbackAt: Calendar.current.date(byAdding: .day, value: fallbackDays, to: .now) ?? .now,
+            status: .active,
+            surfacedAt: .now,
+            primaryURL: inference.primaryURL,
+            canInterruptFocus: inference.canInterruptFocus
+        )
+
+        quickAddDraft = ""
+        withAnimation(.smooth(duration: 0.28)) {
+            isQuickAddExpanded = false
+            nudges.append(item)
+            if presentation == .peek {
+                presentation = .collapsed
+            }
+        }
+        emphasize([item.id])
+        activeContextLabel = "Added to your nudges"
     }
 
     func createNudgeFromCapture() {
@@ -151,7 +200,7 @@ final class NudgeStore {
 
         guard !matchingIDs.isEmpty else { return }
 
-        withAnimation(.snappy(duration: 0.3)) {
+        withAnimation(.smooth(duration: 0.28)) {
             for (offset, id) in matchingIDs.enumerated() {
                 guard let index = nudges.firstIndex(where: { $0.id == id }) else { continue }
                 nudges[index].surfacedAt = Date.now.addingTimeInterval(Double(offset) * 0.001)
@@ -168,7 +217,14 @@ final class NudgeStore {
             nudges.first(where: { $0.id == id })?.status == .active
         }) else { return }
 
+        let activeMatchingIDs = matchingIDs.filter { id in
+            nudges.first(where: { $0.id == id })?.status == .active
+        }
+        emphasize(activeMatchingIDs)
+
         if wasExpanded {
+            panelLayoutDidChange?()
+        } else if presentation == .collapsed {
             panelLayoutDidChange?()
         } else {
             showPeekTemporarily()
@@ -179,6 +235,7 @@ final class NudgeStore {
         guard let index = nudges.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .completed
+            emphasizedNudgeIDs.remove(id)
         }
         if activeNudges.isEmpty {
             collapse()
@@ -189,6 +246,7 @@ final class NudgeStore {
         guard let index = nudges.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .dismissed
+            emphasizedNudgeIDs.remove(id)
         }
     }
 
@@ -211,6 +269,8 @@ final class NudgeStore {
             }
         }
 
+        emphasize(deferredIDs)
+
         if !deferredIDs.isEmpty {
             recapMessage = nil
             activeContextLabel = "While you were away"
@@ -223,12 +283,16 @@ final class NudgeStore {
     func resetDemo() {
         demoTask?.cancel()
         peekTask?.cancel()
+        emphasisTask?.cancel()
         nudges = Self.demoNudges()
+        emphasizedNudgeIDs = []
         isFocusMode = false
         recapMessage = nil
         activeContextLabel = "Context ready"
         captureDraft = ""
         capturePreview = nil
+        quickAddDraft = ""
+        isQuickAddExpanded = false
         activeDebugScenario = nil
         presentation = .collapsed
     }
@@ -275,6 +339,7 @@ final class NudgeStore {
             try? await Task.sleep(for: .milliseconds(900))
                     guard !Task.isCancelled else { return }
                     nudges.append(item)
+                    emphasize([item.id])
                     activeContextLabel = "Today · \(nudges.count) unresolved nudges"
                 }
             }
@@ -288,11 +353,12 @@ final class NudgeStore {
                 try? await Task.sleep(for: .milliseconds(900))
                 guard let self, !Task.isCancelled else { return }
                 guard let index = nudges.firstIndex(where: { $0.title == "Message Alex" }) else { return }
-                withAnimation(.snappy(duration: 0.42)) {
+                withAnimation(.smooth(duration: 0.28)) {
                     nudges[index].surfacedAt = .now
                     nudges[index].invocation = .contextual(.messaging)
                     nudges[index].status = .active
                 }
+                emphasize([nudges[index].id])
                 activeContextLabel = "Slack is active · nudge refreshed"
             }
 
@@ -305,9 +371,10 @@ final class NudgeStore {
             demoTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(900))
                 guard let self, !Task.isCancelled else { return }
-                withAnimation(.snappy(duration: 0.32)) {
+                withAnimation(.smooth(duration: 0.28)) {
                     nudges.append(contentsOf: incomingNudges)
                 }
+                emphasize(incomingNudges.map(\.id))
                 activeContextLabel = "\(incomingNudges.count) nudges arrived together"
             }
 
@@ -340,14 +407,38 @@ final class NudgeStore {
     private func prepareDebugScenario(_ scenario: DebugScenario) {
         demoTask?.cancel()
         peekTask?.cancel()
+        emphasisTask?.cancel()
         activeDebugScenario = scenario
         nudges = []
+        emphasizedNudgeIDs = []
         isFocusMode = false
         recapMessage = nil
         captureDraft = ""
         capturePreview = nil
+        quickAddDraft = ""
+        isQuickAddExpanded = false
         activeContextLabel = "Context ready"
         presentation = .collapsed
+    }
+
+    private func emphasize(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+
+        emphasisTask?.cancel()
+        emphasizedNudgeIDs.formUnion(ids)
+
+        emphasisTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, !Task.isCancelled else { return }
+
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                emphasizedNudgeIDs = []
+            } else {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    emphasizedNudgeIDs = []
+                }
+            }
+        }
     }
 
     private static func demoNudges() -> [NudgeItem] {
