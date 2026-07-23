@@ -12,7 +12,7 @@ enum NudgePanelLayout {
     static let surfaceBottomPadding: CGFloat = 4
     static let rowOuterHorizontalPadding: CGFloat = 8
     static let rowInnerHorizontalPadding: CGFloat = 12
-    static let timelineMarkerWidth: CGFloat = 56
+    static let timelineMarkerWidth: CGFloat = 72
     static let timelineMarkerSpacing: CGFloat = 7
     static let surfaceRightMargin: CGFloat = 18
     static let surfaceTopMargin: CGFloat = 54
@@ -306,7 +306,7 @@ private struct NudgeListRow: View {
             Button(action: beginCompletion) {
                 HStack(alignment: .center, spacing: 0) {
                     timelineMarker
-                        .frame(width: NudgePanelLayout.timelineMarkerWidth, alignment: .trailing)
+                        .frame(width: NudgePanelLayout.timelineMarkerWidth, alignment: .leading)
                         .padding(.trailing, NudgePanelLayout.timelineMarkerSpacing)
 
                     titleLabel
@@ -414,7 +414,7 @@ private struct NudgeListRow: View {
     private func beginCompletion() {
         guard !isCompleting else { return }
 
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.26)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.26)) {
             isCompleting = true
         }
 
@@ -427,24 +427,28 @@ private struct NudgeListRow: View {
         }
     }
 
-    @ViewBuilder
     private var timelineMarker: some View {
-        switch item.invocation {
-        case .temporal:
-            Text((displayedAt ?? item.timelineDate).formatted(date: .omitted, time: .shortened))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-        case .contextual(let context):
-            HStack(spacing: 3) {
-                Image(systemName: context.symbol)
-                    .symbolRenderingMode(.hierarchical)
-
-                Text("Opened")
+        HStack(spacing: 7) {
+            Group {
+                switch item.invocation {
+                case .temporal:
+                    Image(systemName: "clock")
+                        .foregroundStyle(.tertiary)
+                case .contextual(let context):
+                    Image(systemName: context.symbol)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isMuted ? Color.secondary : Color.accentColor)
+                        .help("Triggered by \(context.label.lowercased())")
+                }
             }
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(isMuted ? Color.secondary : Color.accentColor)
-                .help("Triggered by \(context.label.lowercased())")
+            .frame(width: 13, alignment: .leading)
+
+            Text((displayedAt ?? item.timelineDate).formatted(date: .omitted, time: .shortened))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(.caption2.weight(.medium))
     }
 
 }
