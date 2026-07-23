@@ -9,10 +9,12 @@ final class NudgeStore {
     struct SurfacedBatch: Identifiable, Equatable, Sendable {
         let id: UUID
         let nudgeIDs: [UUID]
+        let headerTitle: String?
 
-        init(id: UUID = UUID(), nudgeIDs: [UUID]) {
+        init(id: UUID = UUID(), nudgeIDs: [UUID], headerTitle: String? = nil) {
             self.id = id
             self.nudgeIDs = nudgeIDs
+            self.headerTitle = headerTitle
         }
     }
 
@@ -50,7 +52,6 @@ final class NudgeStore {
     var fallbackDays = 2
     var isListening = false
     var activeDebugScenario: DebugScenario?
-    var focusedNudgeID: UUID?
     var surfacedBatch: SurfacedBatch? {
         didSet { panelLayoutDidChange?() }
     }
@@ -60,7 +61,6 @@ final class NudgeStore {
     @ObservationIgnored var debugScenarioDidRun: (() -> Void)?
     @ObservationIgnored private var peekTask: Task<Void, Never>?
     @ObservationIgnored private var demoTask: Task<Void, Never>?
-    @ObservationIgnored private var attentionTask: Task<Void, Never>?
 
     init(seedDemoData: Bool = true) {
         self.nudges = seedDemoData ? Self.demoNudges() : []
@@ -189,8 +189,6 @@ final class NudgeStore {
         publishSurfaceBatch(activeMatchingIDs)
 
         if wasExpanded {
-            let latestActiveID = activeMatchingIDs.last
-            focusAttention(on: latestActiveID)
             panelLayoutDidChange?()
         } else {
             showPeekTemporarily()
@@ -202,7 +200,6 @@ final class NudgeStore {
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .completed
         }
-        if focusedNudgeID == id { focusedNudgeID = nil }
         if activeNudges.isEmpty {
             collapse()
         }
@@ -213,7 +210,6 @@ final class NudgeStore {
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .dismissed
         }
-        if focusedNudgeID == id { focusedNudgeID = nil }
     }
 
     func setFocusMode(_ enabled: Bool) {
@@ -228,20 +224,18 @@ final class NudgeStore {
         }
 
         let deferredIDs = nudges.filter { $0.status == .deferred }.map(\.id)
-        for id in deferredIDs {
+        for (offset, id) in deferredIDs.enumerated() {
             if let index = nudges.firstIndex(where: { $0.id == id }) {
                 nudges[index].status = .active
+                nudges[index].surfacedAt = Date.now.addingTimeInterval(Double(offset) * 0.001)
             }
         }
 
         if !deferredIDs.isEmpty {
-            let titles = deferredIDs.compactMap { id in
-                nudges.first(where: { $0.id == id })?.title
-            }
-            recapMessage = shortRecap(for: titles)
-            activeContextLabel = "Focus complete"
-            publishSurfaceBatch(deferredIDs)
-            presentation = .expanded
+            recapMessage = nil
+            activeContextLabel = "While you were away"
+            publishSurfaceBatch(deferredIDs, headerTitle: "While you were away")
+            presentation = .collapsed
         } else {
             activeContextLabel = "Context ready"
         }
@@ -250,7 +244,6 @@ final class NudgeStore {
     func resetDemo() {
         demoTask?.cancel()
         peekTask?.cancel()
-        attentionTask?.cancel()
         surfacedBatch = nil
         nudges = Self.demoNudges()
         isFocusMode = false
@@ -259,7 +252,6 @@ final class NudgeStore {
         captureDraft = ""
         capturePreview = nil
         activeDebugScenario = nil
-        focusedNudgeID = nil
         presentation = .collapsed
     }
 
@@ -309,8 +301,8 @@ final class NudgeStore {
                     // before materializing the next Day Stream bubble.
                     try? await Task.sleep(for: .milliseconds(1_650))
                     guard !Task.isCancelled else { return }
-                    nudges.append(item)
                     publishSurfaceBatch([item.id])
+                    nudges.append(item)
                     activeContextLabel = "Today · \(nudges.count) unresolved nudges"
                 }
             }
@@ -334,13 +326,14 @@ final class NudgeStore {
             }
 
         case .multiple:
-            nudges = Self.multipleScenarioNudges()
-            activeContextLabel = "\(nudges.count) nudges arrived together"
-            publishSurfaceBatch(nudges.map(\.id))
+            let incomingNudges = Self.multipleScenarioNudges()
+            nudges = Self.settledScenarioNudges() + incomingNudges
+            activeContextLabel = "\(incomingNudges.count) nudges arrived together"
+            publishSurfaceBatch(incomingNudges.map(\.id))
             presentation = .collapsed
 
         case .focus:
-            nudges = Self.focusScenarioNudges()
+            nudges = Self.settledScenarioNudges() + Self.focusScenarioNudges()
             isFocusMode = true
             activeContextLabel = "Focus mode · 2 nudges held quietly"
             presentation = .peek
@@ -368,7 +361,6 @@ final class NudgeStore {
     private func prepareDebugScenario(_ scenario: DebugScenario) {
         demoTask?.cancel()
         peekTask?.cancel()
-        attentionTask?.cancel()
         surfacedBatch = nil
         activeDebugScenario = scenario
         nudges = []
@@ -376,7 +368,6 @@ final class NudgeStore {
         recapMessage = nil
         captureDraft = ""
         capturePreview = nil
-        focusedNudgeID = nil
         activeContextLabel = "Context ready"
         presentation = .collapsed
     }
@@ -386,29 +377,9 @@ final class NudgeStore {
         surfacedBatch = nil
     }
 
-    private func publishSurfaceBatch(_ ids: [UUID]) {
+    private func publishSurfaceBatch(_ ids: [UUID], headerTitle: String? = nil) {
         guard !ids.isEmpty else { return }
-        surfacedBatch = SurfacedBatch(nudgeIDs: ids)
-    }
-
-    private func shortRecap(for titles: [String]) -> String {
-        guard let first = titles.first else { return "Nothing needs your attention." }
-        if titles.count == 1 { return first }
-        return "\(first) · \(titles.count - 1) more"
-    }
-
-    private func focusAttention(on id: UUID?) {
-        attentionTask?.cancel()
-        focusedNudgeID = id
-        guard id != nil else { return }
-
-        attentionTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(2.4))
-            guard let self, !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.25)) {
-                focusedNudgeID = nil
-            }
-        }
+        surfacedBatch = SurfacedBatch(nudgeIDs: ids, headerTitle: headerTitle)
     }
 
     private static func demoNudges() -> [NudgeItem] {
@@ -611,6 +582,10 @@ final class NudgeStore {
                 status: .active
             )
         ]
+    }
+
+    private static func settledScenarioNudges() -> [NudgeItem] {
+        Array(dayScenarioNudges().prefix(2))
     }
 
     private static func multipleScenarioNudges() -> [NudgeItem] {

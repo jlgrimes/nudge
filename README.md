@@ -24,15 +24,15 @@ open output/Nudge.app
 
 - Use the always-visible scenario panel at the bottom of the screen:
   - **Day Stream** progressively adds six timestamped nudges and grows the ambient panel.
-  - **Single Notification** reactivates an existing timeline item, retimestamps it, moves it to the bottom, and briefly highlights it.
-  - **Multiple Notifications** adds four simultaneous items to one expanded list.
-  - **Focus Mode** lets an urgent item through, holds two normal items, then shows a recap.
+  - **Single Notification** reactivates an existing timeline item, retimestamps it, and surfaces it in a new arrival bubble.
+  - **Multiple Notifications** adds four simultaneous items above an existing ambient list.
+  - **Focus Mode** first holds two normal items, then releases them in a collapsed **While you were away** group.
 - Press `Option-Space` to open capture from any app.
 - Type `Remind me to message Alex` and press Return. Nudge infers a broad messaging context.
 - Switch to Slack, Messages, or Microsoft Teams to fire the reminder from the real frontmost-app context. No Accessibility permission is required.
 - The menu-bar **Slack becomes active** action remains available as a deterministic demo fallback.
 - Add `Remind me to order coffee filters`, then choose **Visit amazon.com** to fire its inferred shopping trigger.
-- Start Focus mode before simulating a context to queue the reminder. Ending Focus shows one short recap.
+- Start Focus mode before simulating a context to queue the reminder. Ending Focus shows a grouped **While you were away** arrival.
 - Choose **Run 10-second demo** for the complete urgent/grouped/focus sequence.
 
 Visible nudges are ordered by the time they surface. A context-triggered item receives a runtime timestamp and animates into the bottom of the open timeline; once the panel reaches its maximum height, it automatically scrolls to the latest item.

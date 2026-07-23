@@ -61,8 +61,11 @@ final class ContextInferenceEngineTests: XCTestCase {
 
         XCTAssertEqual(store.deferredCount, 0)
         XCTAssertTrue(store.activeNudges.contains(where: { $0.title == "Order coffee filters" }))
-        XCTAssertNotNil(store.recapMessage)
+        XCTAssertNil(store.recapMessage)
         XCTAssertEqual(store.surfacedBatch?.nudgeIDs.count, 1)
+        XCTAssertEqual(store.surfacedBatch?.headerTitle, "While you were away")
+        XCTAssertEqual(store.activeContextLabel, "While you were away")
+        XCTAssertEqual(store.presentation, .collapsed)
     }
 
     @MainActor
@@ -84,10 +87,14 @@ final class ContextInferenceEngineTests: XCTestCase {
 
         store.runDebugScenario(.multiple)
 
-        XCTAssertEqual(store.activeNudges.count, 4)
+        let surfacedIDs = Set(store.surfacedBatch?.nudgeIDs ?? [])
+
+        XCTAssertEqual(store.activeNudges.count, 6)
+        XCTAssertEqual(surfacedIDs.count, 4)
+        XCTAssertEqual(store.activeNudges.count { !surfacedIDs.contains($0.id) }, 2)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeContextLabel, "4 nudges arrived together")
-        XCTAssertEqual(Set(store.surfacedBatch?.nudgeIDs ?? []), Set(store.activeNudges.map(\.id)))
+        XCTAssertNil(store.surfacedBatch?.headerTitle)
     }
 
     @MainActor
@@ -115,15 +122,36 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testFocusScenarioHoldsNormalNudgesButShowsUrgentOne() {
+    func testFocusScenarioHoldsThenShowsAWhileAwayBatchCollapsed() {
         let store = NudgeStore(seedDemoData: false)
 
         store.runDebugScenario(.focus)
 
         XCTAssertTrue(store.isFocusMode)
         XCTAssertEqual(store.deferredCount, 2)
-        XCTAssertEqual(store.activeNudges.count, 1)
-        XCTAssertEqual(store.activeNudges.first?.priority, .urgent)
+        XCTAssertEqual(store.activeNudges.count, 3)
+        XCTAssertNil(store.surfacedBatch)
+        XCTAssertEqual(store.activeContextLabel, "Focus mode · 2 nudges held quietly")
+        XCTAssertEqual(store.presentation, .peek)
+
+        store.setFocusMode(false)
+
+        let surfacedIDs = Set(store.surfacedBatch?.nudgeIDs ?? [])
+        let surfacedTitles = Set(
+            store.activeNudges
+                .filter { surfacedIDs.contains($0.id) }
+                .map(\.title)
+        )
+
+        XCTAssertFalse(store.isFocusMode)
+        XCTAssertEqual(store.deferredCount, 0)
+        XCTAssertEqual(store.activeNudges.count, 5)
+        XCTAssertEqual(surfacedIDs.count, 2)
+        XCTAssertEqual(store.activeNudges.count { !surfacedIDs.contains($0.id) }, 3)
+        XCTAssertEqual(surfacedTitles, ["Message Alex about the launch", "Order coffee filters"])
+        XCTAssertEqual(store.surfacedBatch?.headerTitle, "While you were away")
+        XCTAssertEqual(store.activeContextLabel, "While you were away")
+        XCTAssertEqual(store.presentation, .collapsed)
         store.resetDemo()
     }
 

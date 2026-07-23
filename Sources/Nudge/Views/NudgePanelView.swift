@@ -90,7 +90,7 @@ struct NudgePanelView: View {
     }
 
     private var settledActiveNudges: [NudgeItem] {
-        let incomingIDs = Set(incomingNudges.map(\.id))
+        let incomingIDs = Set((displayedBatch ?? store.surfacedBatch)?.nudgeIDs ?? [])
         return store.activeNudges.filter { !incomingIDs.contains($0.id) }
     }
 
@@ -197,11 +197,12 @@ private struct CollapsedContent: View {
                         NudgeListRow(
                             item: item,
                             store: store,
-                            isMuted: item.id != items.last?.id,
+                            isMuted: true,
                             showsExpandControl: item.id == items.last?.id
                         )
                         .id(item.id)
                         .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
+                        .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
                 }
             }
@@ -271,16 +272,10 @@ private struct ExpandedContent: View {
                                 NudgeListRow(
                                     item: item,
                                     store: store,
-                                    isMuted: store.focusedNudgeID != nil && store.focusedNudgeID != item.id
+                                    isMuted: true
                                 )
                                 .id(item.id)
                                 .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
-                                .background {
-                                    if store.focusedNudgeID == item.id {
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(Color.accentColor.opacity(0.13))
-                                    }
-                                }
                             }
 
                             if !store.futureNudges.isEmpty {
@@ -394,7 +389,7 @@ private struct IncomingNudgeSurface: View {
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.secondary)
 
-                    Text("\(items.count) nudges arrived together")
+                    Text(batch.headerTitle ?? "\(items.count) nudges arrived together")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
@@ -421,7 +416,7 @@ private struct IncomingNudgeSurface: View {
         .accessibilityLabel(
             items.count == 1
                 ? "New nudge"
-                : "\(items.count) nudges arrived together"
+                : (batch.headerTitle ?? "\(items.count) nudges arrived together")
         )
         .accessibilityIdentifier("incoming-nudge-batch-\(batch.id.uuidString)")
     }
@@ -438,13 +433,9 @@ private struct NudgeListRow: View {
         HStack(alignment: .center, spacing: 0) {
             timelineMarker
                 .frame(width: 66, alignment: .trailing)
+                .padding(.trailing, 7)
 
             ZStack {
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor).opacity(0.7))
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
-
                 Circle()
                     .fill(Color.primary.opacity(0.08))
                     .overlay {
@@ -502,7 +493,6 @@ private struct NudgeListRow: View {
                 .font(.body)
                 .foregroundStyle(priorityColor)
                 .frame(width: 20, height: 20)
-                .symbolEffect(.bounce, value: store.focusedNudgeID == item.id)
         }
         .buttonStyle(.borderless)
         .help("Mark Complete")
