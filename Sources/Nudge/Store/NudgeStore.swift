@@ -298,11 +298,16 @@ final class NudgeStore {
             nudges = Array(dayNudges.prefix(1))
             activeContextLabel = "Today · 1 unresolved nudge"
             presentation = .collapsed
+            if let firstNudge = dayNudges.first {
+                publishSurfaceBatch([firstNudge.id])
+            }
 
             demoTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 for item in dayNudges.dropFirst() {
-                    try? await Task.sleep(for: .milliseconds(650))
+                    // Leave enough room for the shared one-second hold and absorption
+                    // before materializing the next Day Stream bubble.
+                    try? await Task.sleep(for: .milliseconds(1_650))
                     guard !Task.isCancelled else { return }
                     nudges.append(item)
                     publishSurfaceBatch([item.id])

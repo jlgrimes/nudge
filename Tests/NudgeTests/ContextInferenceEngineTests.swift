@@ -66,7 +66,7 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testDayScenarioBeginsAGrowingAmbientList() {
+    func testDayScenarioSurfacesItsFirstItemAsAnArrivalBatch() {
         let store = NudgeStore(seedDemoData: false)
 
         store.runDebugScenario(.day)
@@ -74,6 +74,7 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.count, 1)
         XCTAssertEqual(store.presentation, .collapsed)
         XCTAssertEqual(store.activeDebugScenario, .day)
+        XCTAssertEqual(store.surfacedBatch?.nudgeIDs, [store.activeNudges[0].id])
         store.resetDemo()
     }
 
