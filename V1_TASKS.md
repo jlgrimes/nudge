@@ -23,8 +23,8 @@ Browser-tab contents, calendar-event contents, contacts, messages, voice capture
 - [x] Separate reminder conditions from reminder actions
 - [x] Support exact application-activation conditions
 - [x] Support Open Application and Open URL actions
-- [ ] Add a review-and-correct step before committing a model interpretation
-- [ ] Make quick add and full capture use the same pending contextual lifecycle
+- [x] Add a review-and-correct step before committing a model interpretation
+- [x] Make quick add and full capture use the same pending contextual lifecycle
 - [ ] Replace model-owned date arithmetic with deterministic temporal resolution
 - [ ] Show the actual inference provider used and any fallback reason
 
