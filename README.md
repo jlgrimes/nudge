@@ -5,7 +5,8 @@ Nudge is a native macOS app for contextual reminders. Capture something once, th
 ## What works
 
 - Global capture with `Option-Space`
-- On-device Apple Intelligence inference for messaging, shopping, calendar, browser, and general work reminders
+- On-device Apple Intelligence inference through Apple’s Foundation Models framework
+- Context inference for messaging, shopping, calendar, browser, and general work reminders
 - Automatic fallback to a deterministic local parser when Apple Intelligence is unavailable
 - Live frontmost-app detection for supported messaging, calendar, browser, and productivity apps
 - Focus mode that quietly holds non-urgent reminders and releases them as a batch
