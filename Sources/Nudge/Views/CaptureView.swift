@@ -7,18 +7,19 @@ struct CaptureView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            inputRow
-
-            if let errorMessage = store.inferenceErrorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .transition(.opacity)
-            }
 
             if let preview = store.capturePreview {
-                confirmation(preview)
+                review(preview)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                inputRow
+
+                if let errorMessage = store.inferenceErrorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .transition(.opacity)
+                }
             }
         }
         .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
@@ -26,16 +27,24 @@ struct CaptureView: View {
         .animation(.snappy(duration: 0.22), value: store.capturePreview?.id)
         .animation(.easeOut(duration: 0.16), value: store.inferenceErrorMessage)
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                isInputFocused = true
+            focusInputAfterLayout()
+        }
+        .onChange(of: store.capturePreview?.id) { _, previewID in
+            if previewID == nil {
+                focusInputAfterLayout()
+            } else {
+                isInputFocused = false
             }
         }
     }
 
     private var header: some View {
         HStack {
-            Label("New Nudge", systemImage: "sparkles")
-                .font(.headline)
+            Label(
+                store.capturePreview == nil ? "New Nudge" : "Review Nudge",
+                systemImage: "sparkles"
+            )
+            .font(.headline)
 
             Spacer()
 
@@ -69,9 +78,9 @@ struct CaptureView: View {
                 if store.isInferring {
                     ProgressView()
                         .controlSize(.small)
-                        .frame(minWidth: 26)
+                        .frame(minWidth: 38)
                 } else {
-                    Text("Add")
+                    Text("Review")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -84,9 +93,13 @@ struct CaptureView: View {
         .controlSize(.regular)
     }
 
-    private func confirmation(_ item: NudgeItem) -> some View {
+    private func review(_ item: NudgeItem) -> some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(item.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+
                 Label(item.contextLabel, systemImage: item.conditions.first?.kind.symbol ?? "sparkles")
 
                 if item.action != .none {
@@ -97,14 +110,32 @@ struct CaptureView: View {
                     "Fallback \(item.fallbackAt.formatted(date: .abbreviated, time: .shortened))",
                     systemImage: "clock"
                 )
+
+                Divider()
+
+                HStack {
+                    Button("Edit Request", action: store.reviseCapturePreview)
+                        .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    Button("Save Nudge", action: store.commitCapturePreview)
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Saved", systemImage: "checkmark.circle.fill")
+            Label("Confirm what Nudge understood", systemImage: "checkmark.bubble")
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.green)
+        }
+    }
+
+    private func focusInputAfterLayout() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            isInputFocused = true
         }
     }
 }
