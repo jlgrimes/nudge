@@ -26,6 +26,7 @@ enum TriggerSource: String, Codable, Sendable {
 }
 
 enum ContextKind: String, Codable, CaseIterable, Sendable {
+    case application
     case messaging
     case onlineShopping
     case calendar
@@ -34,6 +35,7 @@ enum ContextKind: String, Codable, CaseIterable, Sendable {
 
     var label: String {
         switch self {
+        case .application: "Application"
         case .messaging: "Messaging"
         case .onlineShopping: "Shopping online"
         case .calendar: "Calendar"
@@ -44,6 +46,7 @@ enum ContextKind: String, Codable, CaseIterable, Sendable {
 
     var symbol: String {
         switch self {
+        case .application: "app.fill"
         case .messaging: "message.fill"
         case .onlineShopping: "cart.fill"
         case .calendar: "calendar"
@@ -75,21 +78,137 @@ struct ContextTrigger: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+enum NudgeCondition: Hashable, Codable, Sendable {
+    case applicationActivated(bundleIdentifier: String, applicationName: String)
+    case context(ContextTrigger)
+    case urlDomain(String)
+
+    var label: String {
+        switch self {
+        case .applicationActivated(_, let applicationName):
+            "When \(applicationName) is active"
+        case .context(let trigger):
+            trigger.kind.label
+        case .urlDomain(let domain):
+            "When visiting \(domain)"
+        }
+    }
+
+    var kind: ContextKind {
+        switch self {
+        case .applicationActivated:
+            .application
+        case .context(let trigger):
+            trigger.kind
+        case .urlDomain:
+            .browser
+        }
+    }
+
+    func matches(_ event: ContextEvent) -> Bool {
+        switch self {
+        case .applicationActivated(let bundleIdentifier, _):
+            event.identifiers.contains(bundleIdentifier)
+        case .context(let trigger):
+            ContextInferenceEngine.matches(event, trigger: trigger)
+        case .urlDomain(let domain):
+            event.identifiers.contains(domain)
+        }
+    }
+
+    var legacyTrigger: ContextTrigger {
+        switch self {
+        case .applicationActivated(let bundleIdentifier, _):
+            ContextTrigger(
+                kind: .application,
+                identifiers: [bundleIdentifier],
+                confidence: 1,
+                source: .explicit
+            )
+        case .context(let trigger):
+            trigger
+        case .urlDomain(let domain):
+            ContextTrigger(
+                kind: .browser,
+                identifiers: [domain],
+                confidence: 1,
+                source: .explicit
+            )
+        }
+    }
+}
+
+enum NudgeAction: Hashable, Codable, Sendable {
+    case openApplication(bundleIdentifier: String, applicationName: String)
+    case openURL(URL)
+    case none
+
+    var label: String {
+        switch self {
+        case .openApplication(_, let applicationName):
+            "Open \(applicationName)"
+        case .openURL(let url):
+            "Open \(url.host ?? "link")"
+        case .none:
+            "No action"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .openApplication: "arrow.up.forward.app"
+        case .openURL: "arrow.up.forward.square"
+        case .none: "circle"
+        }
+    }
+}
+
 struct NudgeItem: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let originalRequest: String
     let title: String
     let detail: String
     let priority: NudgePriority
-    let triggers: [ContextTrigger]
+    let conditions: [NudgeCondition]
     let fallbackAt: Date
     let createdAt: Date
     var status: NudgeStatus
     var surfacedAt: Date?
     var invocation: NudgeInvocation
-    let primaryURL: URL?
+    let action: NudgeAction
     let canInterruptFocus: Bool
 
+    init(
+        id: UUID = UUID(),
+        originalRequest: String,
+        title: String,
+        detail: String,
+        priority: NudgePriority = .actionable,
+        conditions: [NudgeCondition],
+        fallbackAt: Date,
+        createdAt: Date = .now,
+        status: NudgeStatus = .pending,
+        surfacedAt: Date? = nil,
+        invocation: NudgeInvocation = .temporal,
+        action: NudgeAction = .none,
+        canInterruptFocus: Bool = false
+    ) {
+        self.id = id
+        self.originalRequest = originalRequest
+        self.title = title
+        self.detail = detail
+        self.priority = priority
+        self.conditions = conditions
+        self.fallbackAt = fallbackAt
+        self.createdAt = createdAt
+        self.status = status
+        self.surfacedAt = surfacedAt ?? (status == .active ? createdAt : nil)
+        self.invocation = invocation
+        self.action = action
+        self.canInterruptFocus = canInterruptFocus
+    }
+
+    /// Compatibility initializer for the original provider contract and demo data.
     init(
         id: UUID = UUID(),
         originalRequest: String,
@@ -105,27 +224,109 @@ struct NudgeItem: Identifiable, Hashable, Codable, Sendable {
         primaryURL: URL? = nil,
         canInterruptFocus: Bool = false
     ) {
-        self.id = id
-        self.originalRequest = originalRequest
-        self.title = title
-        self.detail = detail
-        self.priority = priority
-        self.triggers = triggers
-        self.fallbackAt = fallbackAt
-        self.createdAt = createdAt
-        self.status = status
-        self.surfacedAt = surfacedAt ?? (status == .active ? createdAt : nil)
-        self.invocation = invocation
-        self.primaryURL = primaryURL
-        self.canInterruptFocus = canInterruptFocus
+        self.init(
+            id: id,
+            originalRequest: originalRequest,
+            title: title,
+            detail: detail,
+            priority: priority,
+            conditions: triggers.map(NudgeCondition.context),
+            fallbackAt: fallbackAt,
+            createdAt: createdAt,
+            status: status,
+            surfacedAt: surfacedAt,
+            invocation: invocation,
+            action: primaryURL.map(NudgeAction.openURL) ?? .none,
+            canInterruptFocus: canInterruptFocus
+        )
+    }
+
+    var triggers: [ContextTrigger] {
+        conditions.map(\.legacyTrigger)
+    }
+
+    var primaryURL: URL? {
+        guard case .openURL(let url) = action else { return nil }
+        return url
     }
 
     var contextLabel: String {
-        triggers.first?.kind.label ?? "At a helpful moment"
+        conditions.first?.label ?? "At a helpful moment"
     }
 
     var timelineDate: Date {
         surfacedAt ?? createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case originalRequest
+        case title
+        case detail
+        case priority
+        case conditions
+        case triggers
+        case fallbackAt
+        case createdAt
+        case status
+        case surfacedAt
+        case invocation
+        case action
+        case primaryURL
+        case canInterruptFocus
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        originalRequest = try container.decode(String.self, forKey: .originalRequest)
+        title = try container.decode(String.self, forKey: .title)
+        detail = try container.decode(String.self, forKey: .detail)
+        priority = try container.decode(NudgePriority.self, forKey: .priority)
+        fallbackAt = try container.decode(Date.self, forKey: .fallbackAt)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        status = try container.decode(NudgeStatus.self, forKey: .status)
+        surfacedAt = try container.decodeIfPresent(Date.self, forKey: .surfacedAt)
+        invocation = try container.decode(NudgeInvocation.self, forKey: .invocation)
+        canInterruptFocus = try container.decode(Bool.self, forKey: .canInterruptFocus)
+
+        if let decodedConditions = try container.decodeIfPresent(
+            [NudgeCondition].self,
+            forKey: .conditions
+        ) {
+            conditions = decodedConditions
+        } else {
+            let legacyTriggers = try container.decodeIfPresent(
+                [ContextTrigger].self,
+                forKey: .triggers
+            ) ?? []
+            conditions = legacyTriggers.map(NudgeCondition.context)
+        }
+
+        if let decodedAction = try container.decodeIfPresent(NudgeAction.self, forKey: .action) {
+            action = decodedAction
+        } else if let legacyURL = try container.decodeIfPresent(URL.self, forKey: .primaryURL) {
+            action = .openURL(legacyURL)
+        } else {
+            action = .none
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(originalRequest, forKey: .originalRequest)
+        try container.encode(title, forKey: .title)
+        try container.encode(detail, forKey: .detail)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(conditions, forKey: .conditions)
+        try container.encode(fallbackAt, forKey: .fallbackAt)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(surfacedAt, forKey: .surfacedAt)
+        try container.encode(invocation, forKey: .invocation)
+        try container.encode(action, forKey: .action)
+        try container.encode(canInterruptFocus, forKey: .canInterruptFocus)
     }
 }
 
@@ -163,7 +364,7 @@ struct ContextEvent: Identifiable, Hashable, Sendable {
         identifiers: ["calendar.urgent", "calendar:any"]
     )
 
-    static func activatedApplication(bundleIdentifier: String, name: String) -> ContextEvent? {
+    static func activatedApplication(bundleIdentifier: String, name: String) -> ContextEvent {
         let messagingBundleIDs: Set<String> = [
             "com.tinyspeck.slackmacgap",
             "com.apple.MobileSMS",
@@ -192,42 +393,29 @@ struct ContextEvent: Identifiable, Hashable, Sendable {
             "com.linear"
         ]
 
+        let kind: ContextKind
+        var identifiers: Set<String> = [bundleIdentifier]
+
         if messagingBundleIDs.contains(bundleIdentifier) {
-            return ContextEvent(
-                id: "app:\(bundleIdentifier)",
-                kind: .messaging,
-                label: "\(name) is active",
-                identifiers: [bundleIdentifier]
-            )
+            kind = .messaging
+        } else if calendarBundleIDs.contains(bundleIdentifier) {
+            kind = .calendar
+            identifiers.insert("calendar:any")
+        } else if browserBundleIDs.contains(bundleIdentifier) {
+            kind = .browser
+            identifiers.insert("context:any-browser")
+        } else if productivityBundleIDs.contains(bundleIdentifier) {
+            kind = .productivity
+            identifiers.insert("context:any-work")
+        } else {
+            kind = .application
         }
 
-        if calendarBundleIDs.contains(bundleIdentifier) {
-            return ContextEvent(
-                id: "app:\(bundleIdentifier)",
-                kind: .calendar,
-                label: "\(name) is active",
-                identifiers: [bundleIdentifier, "calendar:any"]
-            )
-        }
-
-        if browserBundleIDs.contains(bundleIdentifier) {
-            return ContextEvent(
-                id: "app:\(bundleIdentifier)",
-                kind: .browser,
-                label: "\(name) is active",
-                identifiers: [bundleIdentifier, "context:any-browser"]
-            )
-        }
-
-        if productivityBundleIDs.contains(bundleIdentifier) {
-            return ContextEvent(
-                id: "app:\(bundleIdentifier)",
-                kind: .productivity,
-                label: "\(name) is active",
-                identifiers: [bundleIdentifier, "context:any-work"]
-            )
-        }
-
-        return nil
+        return ContextEvent(
+            id: "app:\(bundleIdentifier)",
+            kind: kind,
+            label: "\(name) is active",
+            identifiers: identifiers
+        )
     }
 }
