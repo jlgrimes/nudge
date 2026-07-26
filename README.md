@@ -14,6 +14,34 @@ Nudge is a native macOS app for contextual reminders. Capture something once, th
 
 Nudge performs app-context matching locally and does not require Accessibility permission.
 
+## Inference architecture
+
+Reminder creation depends on `NudgeInferenceProvider`, an asynchronous black-box interface. Providers receive a structured `NudgeInferenceRequest` containing the user’s text, reference date, fallback preference, locale, and time zone. They return one provider-neutral `InferenceResult` containing:
+
+- display title and detail
+- priority and Focus interruption behavior
+- one or more app/context triggers with confidence
+- an optional action URL
+- an optional exact fallback date
+
+The production store talks only to `NudgeInferenceService`; it does not know how interpretation was produced. `MockLLMInferenceProvider` is the current provider and delegates to the deterministic string parser. A future OpenAI, Anthropic, Apple Intelligence, or local-model implementation can conform to the same protocol and be injected without changing capture, persistence, scheduling, or context matching.
+
+Providers can be composed with `FallbackInferenceProvider`, allowing a network model to fall back to the local rule-based provider when it is unavailable.
+
+```swift
+let inference = NudgeInferenceService(
+    provider: FallbackInferenceProvider(
+        primary: FutureLLMProvider(),
+        fallback: MockLLMInferenceProvider()
+    )
+)
+
+let store = NudgeStore(
+    seedDemoData: false,
+    inferenceService: inference
+)
+```
+
 ## Run
 
 Requires macOS 26 and Xcode 26 or newer.
@@ -52,4 +80,4 @@ swift test
 
 ## Current integration boundary
 
-Nudge currently observes frontmost application changes. URL-level browser matching and speech transcription are separate integrations; the production UI does not present mocked versions of either feature.
+Nudge currently observes frontmost application changes. URL-level browser matching and speech transcription are separate integrations; the production UI does not present mocked versions of either feature. The inference provider seam is ready for a real model, but no network LLM provider or API key storage is included yet.
