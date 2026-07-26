@@ -24,7 +24,7 @@ struct NudgeMenuView: View {
             Button("Show Nudge", systemImage: "rectangle.on.rectangle") {
                 store.showExpanded()
             }
-            Button("Remind me to", systemImage: "plus") {
+            Button("New contextual nudge", systemImage: "plus") {
                 store.showCapture()
             }
             Button(
@@ -34,28 +34,27 @@ struct NudgeMenuView: View {
                 store.setFocusMode(!store.isFocusMode)
             }
 
-            Divider()
+            if NudgeRuntime.debugToolsEnabled {
+                Divider()
 
-            Text("Simulate context")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Button("Slack becomes active", systemImage: "message.fill") {
-                store.receive(context: .slack)
-            }
-            Button("Visit amazon.com", systemImage: "cart.fill") {
-                store.receive(context: .amazon)
-            }
-            Button("Urgent calendar event", systemImage: "calendar.badge.exclamationmark") {
-                store.receive(context: .calendar)
-            }
-
-            Divider()
-
-            Button("Run 10-second demo", systemImage: "play.fill") {
-                store.runDemo()
-            }
-            Button("Reset demo", systemImage: "arrow.counterclockwise") {
-                store.resetDemo()
+                Text("Debug contexts")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Button("Slack becomes active", systemImage: "message.fill") {
+                    store.receive(context: .slack)
+                }
+                Button("Visit amazon.com", systemImage: "cart.fill") {
+                    store.receive(context: .amazon)
+                }
+                Button("Urgent calendar event", systemImage: "calendar.badge.exclamationmark") {
+                    store.receive(context: .calendar)
+                }
+                Button("Run 10-second demo", systemImage: "play.fill") {
+                    store.runDemo()
+                }
+                Button("Reset demo", systemImage: "arrow.counterclockwise") {
+                    store.resetDemo()
+                }
             }
 
             Divider()
@@ -80,19 +79,25 @@ struct NudgeSettingsView: View {
         Form {
             Section("Fallback") {
                 Stepper("Remind after \(store.fallbackDays) days", value: $store.fallbackDays, in: 1...7)
-                Text("If no useful context appears, Nudge falls back to an ordinary reminder.")
+                Text("If a useful context never appears, the nudge surfaces automatically after this delay.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section("Capture") {
                 LabeledContent("Global shortcut", value: "⌥ Space")
-                Text("Voice transcription and contextual events are mocked in this prototype.")
+                Text("App activity is matched locally on this Mac. Nudge does not require Accessibility access.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Data") {
+                Text("Your nudges and fallback setting are stored locally in Application Support.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 260)
+        .frame(width: 440, height: 320)
     }
 }
