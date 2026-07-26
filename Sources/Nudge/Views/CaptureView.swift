@@ -114,6 +114,11 @@ struct CaptureView: View {
             )
             .lineLimit(1)
 
+            if let providerLabel {
+                Label(providerLabel, systemImage: "brain.head.profile")
+                    .lineLimit(1)
+            }
+
             Divider()
 
             HStack {
@@ -139,6 +144,19 @@ struct CaptureView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private var providerLabel: String? {
+        switch store.lastInferenceProviderID {
+        case "apple-intelligence-on-device":
+            "Interpreted by Apple Intelligence"
+        case "mock-rule-based":
+            "Interpreted by the local parser"
+        case .some(let providerID):
+            "Interpreted by \(providerID)"
+        case nil:
+            nil
         }
     }
 
