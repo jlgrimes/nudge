@@ -33,18 +33,20 @@ final class ContextInferenceEngineTests: XCTestCase {
             name: "Slack"
         )
 
-        XCTAssertEqual(event?.kind, .messaging)
-        XCTAssertEqual(event?.identifiers, ["com.tinyspeck.slackmacgap"])
-        XCTAssertEqual(event?.label, "Slack is active")
+        XCTAssertEqual(event.kind, .messaging)
+        XCTAssertEqual(event.identifiers, ["com.tinyspeck.slackmacgap"])
+        XCTAssertEqual(event.label, "Slack is active")
     }
 
-    func testUnrelatedApplicationDoesNotCreateAContext() {
+    func testUnknownApplicationStillCreatesAnExactApplicationContext() {
         let event = ContextEvent.activatedApplication(
-            bundleIdentifier: "com.apple.finder",
-            name: "Finder"
+            bundleIdentifier: "com.example.specialized-tool",
+            name: "Specialized Tool"
         )
 
-        XCTAssertNil(event)
+        XCTAssertEqual(event.kind, .application)
+        XCTAssertEqual(event.identifiers, ["com.example.specialized-tool"])
+        XCTAssertEqual(event.label, "Specialized Tool is active")
     }
 
     @MainActor
@@ -123,7 +125,10 @@ final class ContextInferenceEngineTests: XCTestCase {
 
     @MainActor
     func testQuickAddCreatesAnActiveTimelineNudgeAndCollapsesTheInput() async {
-        let store = NudgeStore(seedDemoData: false)
+        let store = NudgeStore(
+            seedDemoData: false,
+            inferenceService: NudgeInferenceService(provider: MockLLMInferenceProvider())
+        )
         store.showQuickAdd()
         store.quickAddDraft = "Review the launch checklist"
 
