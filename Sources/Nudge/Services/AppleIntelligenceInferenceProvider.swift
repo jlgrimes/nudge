@@ -64,10 +64,9 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
             )
         }
 
-        let session = LanguageModelSession(
-            model: model,
-            instructions: Self.instructions
-        )
+        let session = LanguageModelSession(model: model) {
+            Self.instructions
+        }
         let response = try await session.respond(
             to: Self.prompt(for: request),
             generating: AppleGeneratedNudge.self
