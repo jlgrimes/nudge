@@ -1,43 +1,77 @@
 # Nudge
 
-Nudge is a native macOS app for contextual reminders. Capture something once, then let it resurface when the relevant kind of app becomes active. If that context never appears, Nudge falls back to a normal time-based reminder.
+Nudge is a native macOS app for contextual reminders. Capture something once, then let it resurface when the relevant application or broad work context becomes active. If that context never appears, Nudge falls back to a normal time-based reminder.
+
+The active V1 roadmap is tracked in [`V1_TASKS.md`](V1_TASKS.md).
 
 ## What works
 
 - Global capture with `Option-Space`
 - On-device Apple Intelligence inference through Apple’s Foundation Models framework
-- Context inference for messaging, shopping, calendar, browser, and general work reminders
 - Automatic fallback to a deterministic local parser when Apple Intelligence is unavailable
-- Live frontmost-app detection for supported messaging, calendar, browser, and productivity apps
+- Dynamic discovery of applications installed in user, system, and standard Applications folders
+- Exact application-activation conditions for named installed apps
+- Broad context inference for messaging, shopping, calendar, browser, and general work reminders
+- Separate reminder conditions and actions
+- Open Application and Open URL actions
+- Live frontmost-app detection for every activated application
 - Focus mode that quietly holds non-urgent reminders and releases them as a batch
 - Automatic fallback reminders after a configurable number of days
 - Local persistence for reminders, completion state, Focus state, and settings
+- Backward decoding for state written by the earlier trigger-and-URL model
 - A floating Liquid Glass timeline plus a menu-bar control
 
 Nudge performs inference and app-context matching locally. It does not require Accessibility permission, a cloud API key, or a network LLM request.
 
+## Reminder model
+
+A reminder now separates the event that makes it useful from the action offered to the user:
+
+```swift
+let condition = NudgeCondition.applicationActivated(
+    bundleIdentifier: "com.hnc.Discord",
+    applicationName: "Discord"
+)
+
+let action = NudgeAction.openApplication(
+    bundleIdentifier: "com.hnc.Discord",
+    applicationName: "Discord",
+    applicationURL: URL(fileURLWithPath: "/Applications/Discord.app")
+)
+```
+
+This distinction lets future browser, calendar, and other adapters add new conditions without changing the action system.
+
 ## Inference architecture
 
-Reminder creation depends on `NudgeInferenceProvider`, an asynchronous black-box interface. Providers receive a structured `NudgeInferenceRequest` containing the user’s text, reference date, fallback preference, locale, and time zone. They return one provider-neutral `InferenceResult` containing:
+Reminder creation depends on `NudgeInferenceProvider`, an asynchronous black-box interface. Providers receive a structured `NudgeInferenceRequest` containing:
+
+- the user’s text
+- reference date and fallback preference
+- locale and time zone
+- a validated catalog of relevant installed applications
+
+They return one provider-neutral `InferenceResult` containing:
 
 - display title and detail
 - priority and Focus interruption behavior
-- one or more app/context triggers with confidence
-- an optional action URL
+- one or more conditions
+- an action
 - an optional exact fallback date
 
 The production store talks only to `NudgeInferenceService`; it does not know how interpretation was produced.
 
-`AppleIntelligenceInferenceProvider` is the default provider. It uses Apple’s Foundation Models framework and guided generation to receive a constrained Swift value directly from the on-device model. Before the generated value reaches the store, Nudge validates identifiers, URLs, confidence, fallback timing, and Focus interruption behavior.
+`AppleIntelligenceInferenceProvider` is the default provider. It uses Apple’s Foundation Models framework and guided generation to receive a constrained Swift value directly from the on-device model. When a request names an installed application, the generated bundle identifier must match the catalog supplied by Nudge. Invented identifiers are rejected and fall back to a validated broad context.
 
-The live service wraps Apple Intelligence in `FallbackInferenceProvider`. If the device is ineligible, Apple Intelligence is disabled, the model is not ready, or generation fails, Nudge transparently falls back to `MockLLMInferenceProvider`, which delegates to the deterministic parser.
+The live service wraps Apple Intelligence in `FallbackInferenceProvider`. If the device is ineligible, Apple Intelligence is disabled, the model is not ready, or generation fails, Nudge transparently falls back to `MockLLMInferenceProvider`. The deterministic provider uses the same installed-app catalog and can resolve an explicitly named app without model access.
 
 ```swift
 let inference = NudgeInferenceService(
     provider: FallbackInferenceProvider(
         primary: AppleIntelligenceInferenceProvider(),
         fallback: MockLLMInferenceProvider()
-    )
+    ),
+    applicationCatalog: InstalledApplicationCatalog.live
 )
 
 let store = NudgeStore(
