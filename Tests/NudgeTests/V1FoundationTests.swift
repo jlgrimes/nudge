@@ -51,8 +51,9 @@ final class V1FoundationTests: XCTestCase {
             fallbackDays: 2
         )
 
-        guard case .applicationActivated(let bundleIdentifier, let applicationName) =
-            response.result.conditions.first
+        guard
+            let firstCondition = response.result.conditions.first,
+            case .applicationActivated(let bundleIdentifier, let applicationName) = firstCondition
         else {
             return XCTFail("Expected an exact application condition")
         }
@@ -154,14 +155,20 @@ final class V1FoundationTests: XCTestCase {
         )
 
         let validResult = try AppleIntelligenceInferenceProvider.map(valid, request: request)
-        guard case .applicationActivated(let bundleIdentifier, _) = validResult.conditions.first else {
+        guard
+            let validCondition = validResult.conditions.first,
+            case .applicationActivated(let bundleIdentifier, _) = validCondition
+        else {
             return XCTFail("Expected exact installed-app condition")
         }
         XCTAssertEqual(bundleIdentifier, "com.figma.Desktop")
         XCTAssertEqual(validResult.primaryURL, installed.applicationURL)
 
         let inventedResult = try AppleIntelligenceInferenceProvider.map(invented, request: request)
-        guard case .context(let fallbackTrigger) = inventedResult.conditions.first else {
+        guard
+            let inventedCondition = inventedResult.conditions.first,
+            case .context(let fallbackTrigger) = inventedCondition
+        else {
             return XCTFail("Invented app should fall back to a validated broad context")
         }
         XCTAssertEqual(fallbackTrigger.kind, .productivity)
@@ -197,7 +204,10 @@ final class V1FoundationTests: XCTestCase {
             from: JSONEncoder().encode(legacy)
         )
 
-        guard case .context(let trigger) = decoded.conditions.first else {
+        guard
+            let decodedCondition = decoded.conditions.first,
+            case .context(let trigger) = decodedCondition
+        else {
             return XCTFail("Expected migrated context condition")
         }
         XCTAssertEqual(trigger.kind, .onlineShopping)
