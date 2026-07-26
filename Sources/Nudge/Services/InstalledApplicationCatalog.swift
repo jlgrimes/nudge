@@ -90,7 +90,7 @@ actor InstalledApplicationCatalog: InstalledApplicationProviding {
         }
     }
 
-    private static var defaultSearchRoots: [URL] {
+    static var defaultSearchRoots: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [
             home.appendingPathComponent("Applications", isDirectory: true),
