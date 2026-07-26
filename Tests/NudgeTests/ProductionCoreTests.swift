@@ -9,8 +9,8 @@ final class ProductionCoreTests: XCTestCase {
             name: "Xcode"
         )
 
-        XCTAssertEqual(event?.kind, .productivity)
-        XCTAssertTrue(event?.identifiers.contains("context:any-work") == true)
+        XCTAssertEqual(event.kind, .productivity)
+        XCTAssertTrue(event.identifiers.contains("context:any-work"))
     }
 
     func testBrowserApplicationCreatesBrowserContext() {
@@ -19,8 +19,8 @@ final class ProductionCoreTests: XCTestCase {
             name: "Safari"
         )
 
-        XCTAssertEqual(event?.kind, .browser)
-        XCTAssertTrue(event?.identifiers.contains("context:any-browser") == true)
+        XCTAssertEqual(event.kind, .browser)
+        XCTAssertTrue(event.identifiers.contains("context:any-browser"))
     }
 
     func testCalendarIntentMatchesCalendarApplication() {
@@ -36,7 +36,7 @@ final class ProductionCoreTests: XCTestCase {
         XCTAssertEqual(inference.priority, .urgent)
         XCTAssertTrue(inference.canInterruptFocus)
         XCTAssertTrue(
-            event.map { ContextInferenceEngine.matches($0, trigger: inference.triggers[0]) } == true
+            ContextInferenceEngine.matches(event, trigger: inference.triggers[0])
         )
     }
 
@@ -58,7 +58,7 @@ final class ProductionCoreTests: XCTestCase {
         )
 
         XCTAssertTrue(
-            event.map { ContextInferenceEngine.matches($0, trigger: inference.triggers[0]) } == true
+            ContextInferenceEngine.matches(event, trigger: inference.triggers[0])
         )
     }
 
