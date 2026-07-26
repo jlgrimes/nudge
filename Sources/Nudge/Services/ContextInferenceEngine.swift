@@ -55,8 +55,7 @@ struct InferenceResult: Codable, Equatable, Sendable {
     }
 
     var primaryURL: URL? {
-        guard case .openURL(let url) = action else { return nil }
-        return url
+        action.targetURL
     }
 
     func targeting(_ application: InstalledApplicationDescriptor) -> InferenceResult {
@@ -72,7 +71,8 @@ struct InferenceResult: Codable, Equatable, Sendable {
             ],
             action: .openApplication(
                 bundleIdentifier: application.bundleIdentifier,
-                applicationName: application.name
+                applicationName: application.name,
+                applicationURL: application.applicationURL
             ),
             canInterruptFocus: canInterruptFocus,
             fallbackAt: fallbackAt
