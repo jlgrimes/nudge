@@ -124,7 +124,7 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testQuickAddCreatesAnActiveTimelineNudgeAndCollapsesTheInput() async {
+    func testQuickAddCreatesPendingContextualNudgeAndCollapsesTheInput() async {
         let store = NudgeStore(
             seedDemoData: false,
             inferenceService: NudgeInferenceService(provider: MockLLMInferenceProvider())
@@ -136,10 +136,10 @@ final class ContextInferenceEngineTests: XCTestCase {
 
         XCTAssertFalse(store.isQuickAddExpanded)
         XCTAssertTrue(store.quickAddDraft.isEmpty)
-        XCTAssertEqual(store.activeNudges.count, 1)
-        XCTAssertEqual(store.activeNudges.first?.status, .active)
-        XCTAssertEqual(store.activeNudges.first?.invocation, .temporal)
-        XCTAssertNotNil(store.activeNudges.first?.surfacedAt)
+        XCTAssertEqual(store.activeNudges.count, 0)
+        XCTAssertEqual(store.futureNudges.count, 1)
+        XCTAssertEqual(store.futureNudges.first?.status, .pending)
+        XCTAssertNil(store.futureNudges.first?.surfacedAt)
         XCTAssertEqual(store.lastInferenceProviderID, "mock-rule-based")
     }
 
