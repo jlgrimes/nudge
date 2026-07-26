@@ -6,11 +6,30 @@ struct InferenceResult: Codable, Equatable, Sendable {
     let title: String
     let detail: String
     let priority: NudgePriority
-    let triggers: [ContextTrigger]
-    let primaryURL: URL?
+    let conditions: [NudgeCondition]
+    let action: NudgeAction
     let canInterruptFocus: Bool
     let fallbackAt: Date?
 
+    init(
+        title: String,
+        detail: String,
+        priority: NudgePriority,
+        conditions: [NudgeCondition],
+        action: NudgeAction = .none,
+        canInterruptFocus: Bool,
+        fallbackAt: Date? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.priority = priority
+        self.conditions = conditions
+        self.action = action
+        self.canInterruptFocus = canInterruptFocus
+        self.fallbackAt = fallbackAt
+    }
+
+    /// Compatibility initializer for existing providers and tests.
     init(
         title: String,
         detail: String,
@@ -20,13 +39,44 @@ struct InferenceResult: Codable, Equatable, Sendable {
         canInterruptFocus: Bool,
         fallbackAt: Date? = nil
     ) {
-        self.title = title
-        self.detail = detail
-        self.priority = priority
-        self.triggers = triggers
-        self.primaryURL = primaryURL
-        self.canInterruptFocus = canInterruptFocus
-        self.fallbackAt = fallbackAt
+        self.init(
+            title: title,
+            detail: detail,
+            priority: priority,
+            conditions: triggers.map(NudgeCondition.context),
+            action: primaryURL.map(NudgeAction.openURL) ?? .none,
+            canInterruptFocus: canInterruptFocus,
+            fallbackAt: fallbackAt
+        )
+    }
+
+    var triggers: [ContextTrigger] {
+        conditions.map(\.legacyTrigger)
+    }
+
+    var primaryURL: URL? {
+        guard case .openURL(let url) = action else { return nil }
+        return url
+    }
+
+    func targeting(_ application: InstalledApplicationDescriptor) -> InferenceResult {
+        InferenceResult(
+            title: title,
+            detail: "When \(application.name) is active",
+            priority: priority,
+            conditions: [
+                .applicationActivated(
+                    bundleIdentifier: application.bundleIdentifier,
+                    applicationName: application.name
+                )
+            ],
+            action: .openApplication(
+                bundleIdentifier: application.bundleIdentifier,
+                applicationName: application.name
+            ),
+            canInterruptFocus: canInterruptFocus,
+            fallbackAt: fallbackAt
+        )
     }
 }
 
@@ -174,6 +224,10 @@ enum ContextInferenceEngine {
     static func matches(_ event: ContextEvent, trigger: ContextTrigger) -> Bool {
         if trigger.kind == .onlineShopping, event.kind == .browser {
             return event.identifiers.contains("context:any-browser")
+        }
+
+        if trigger.kind == .application {
+            return !event.identifiers.isDisjoint(with: Set(trigger.identifiers))
         }
 
         guard event.kind == trigger.kind else { return false }
