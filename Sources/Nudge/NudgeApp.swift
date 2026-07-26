@@ -24,17 +24,29 @@ final class NudgeAppDelegate: NSObject, NSApplicationDelegate {
     private var debugPanelController: DebugPanelController?
     private var hotKeyManager: GlobalHotKeyManager?
     private var appContextMonitor: AppContextMonitor?
+    private var runtimeController: NudgeRuntimeController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        if NudgeRuntime.debugToolsEnabled {
+            NudgeStore.shared.resetDemo()
+            debugPanelController = DebugPanelController(store: .shared)
+        } else {
+            runtimeController = NudgeRuntimeController(store: .shared)
+        }
+
         panelController = FloatingPanelController(store: .shared)
-        debugPanelController = DebugPanelController(store: .shared)
         hotKeyManager = GlobalHotKeyManager {
             NudgeStore.shared.showCapture()
         }
         appContextMonitor = AppContextMonitor { context in
             NudgeStore.shared.receive(context: context)
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        runtimeController?.flush()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
