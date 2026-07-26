@@ -36,6 +36,40 @@ struct AppleIntelligenceDraft: Equatable, Sendable {
     let canInterruptFocus: Bool
     let hasExplicitFallback: Bool
     let fallbackDelayMinutes: Int
+    let hasTargetApplication: Bool
+    let targetApplicationBundleIdentifier: String
+
+    init(
+        title: String,
+        detail: String,
+        priority: Priority,
+        context: Context,
+        identifiers: [String],
+        source: Source,
+        confidence: Double,
+        hasPrimaryURL: Bool,
+        primaryURL: String,
+        canInterruptFocus: Bool,
+        hasExplicitFallback: Bool,
+        fallbackDelayMinutes: Int,
+        hasTargetApplication: Bool = false,
+        targetApplicationBundleIdentifier: String = ""
+    ) {
+        self.title = title
+        self.detail = detail
+        self.priority = priority
+        self.context = context
+        self.identifiers = identifiers
+        self.source = source
+        self.confidence = confidence
+        self.hasPrimaryURL = hasPrimaryURL
+        self.primaryURL = primaryURL
+        self.canInterruptFocus = canInterruptFocus
+        self.hasExplicitFallback = hasExplicitFallback
+        self.fallbackDelayMinutes = fallbackDelayMinutes
+        self.hasTargetApplication = hasTargetApplication
+        self.targetApplicationBundleIdentifier = targetApplicationBundleIdentifier
+    }
 }
 
 enum AppleIntelligenceInferenceError: LocalizedError, Equatable {
@@ -100,6 +134,11 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
             ? defaultIdentifiers(for: kind)
             : identifiers
 
+        let targetApplication = resolvedApplication(
+            enabled: draft.hasTargetApplication,
+            bundleIdentifier: draft.targetApplicationBundleIdentifier,
+            installedApplications: request.installedApplications
+        )
         let priority = nudgePriority(for: draft.priority)
         let detail = draft.detail.trimmingCharacters(in: .whitespacesAndNewlines)
         let confidence = min(max(draft.confidence, 0), 1)
@@ -113,22 +152,56 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
             referenceDate: request.referenceDate
         )
 
+        let conditions: [NudgeCondition]
+        let action: NudgeAction
+        let defaultResultDetail: String
+
+        if let targetApplication {
+            conditions = [
+                .applicationActivated(
+                    bundleIdentifier: targetApplication.bundleIdentifier,
+                    applicationName: targetApplication.name
+                )
+            ]
+            action = .openApplication(
+                bundleIdentifier: targetApplication.bundleIdentifier,
+                applicationName: targetApplication.name
+            )
+            defaultResultDetail = "When \(targetApplication.name) is active"
+        } else {
+            conditions = [
+                .context(
+                    ContextTrigger(
+                        kind: kind,
+                        identifiers: resolvedIdentifiers,
+                        confidence: confidence,
+                        source: draft.source == .explicit ? .explicit : .inferred
+                    )
+                )
+            ]
+            action = primaryURL.map(NudgeAction.openURL) ?? .none
+            defaultResultDetail = defaultDetail(for: kind)
+        }
+
         return InferenceResult(
             title: title,
-            detail: detail.isEmpty ? defaultDetail(for: kind) : detail,
+            detail: detail.isEmpty ? defaultResultDetail : detail,
             priority: priority,
-            triggers: [
-                ContextTrigger(
-                    kind: kind,
-                    identifiers: resolvedIdentifiers,
-                    confidence: confidence,
-                    source: draft.source == .explicit ? .explicit : .inferred
-                )
-            ],
-            primaryURL: primaryURL,
+            conditions: conditions,
+            action: action,
             canInterruptFocus: priority == .urgent && draft.canInterruptFocus,
             fallbackAt: fallbackAt
         )
+    }
+
+    private static func resolvedApplication(
+        enabled: Bool,
+        bundleIdentifier: String,
+        installedApplications: [InstalledApplicationDescriptor]
+    ) -> InstalledApplicationDescriptor? {
+        guard enabled else { return nil }
+        let normalized = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return installedApplications.first { $0.bundleIdentifier == normalized }
     }
 
     private static func contextKind(for context: AppleIntelligenceDraft.Context) -> ContextKind {
@@ -151,6 +224,8 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
 
     private static func allowedIdentifiers(for kind: ContextKind) -> [String] {
         switch kind {
+        case .application:
+            []
         case .messaging:
             [
                 "com.tinyspeck.slackmacgap",
@@ -184,6 +259,8 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
 
     private static func defaultIdentifiers(for kind: ContextKind) -> [String] {
         switch kind {
+        case .application:
+            []
         case .messaging:
             allowedIdentifiers(for: kind)
         case .onlineShopping:
@@ -199,6 +276,7 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
 
     private static func defaultDetail(for kind: ContextKind) -> String {
         switch kind {
+        case .application: "When the selected application is active"
         case .messaging: "When you’re messaging"
         case .onlineShopping: "While you’re shopping online"
         case .calendar: "When your calendar is active"
@@ -235,20 +313,26 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
     Convert one reminder request into one concise contextual nudge. Return only the
     guided structure. Write the title and detail in the same language as the request.
 
-    Choose the context in which the reminder is most useful. Use an explicit app,
-    website, date, or time only when the person actually names or clearly implies it.
-    Never invent bundle identifiers, domains, contacts, dates, or URLs.
+    Prefer an exact installed application when the person names one. Select only a
+    bundle identifier listed in the prompt. Never invent applications, bundle
+    identifiers, domains, contacts, dates, or URLs.
 
-    Urgent means the reminder is time-sensitive enough to interrupt Focus, such as
-    leaving for or joining something soon. Most reminders are actionable. Use
-    informational only for passive context or summaries. Only set an explicit fallback
-    when the request itself gives a time, date, or deadline.
+    Choose a broad context only when no exact installed application is named. Urgent
+    means the reminder is time-sensitive enough to interrupt Focus, such as leaving
+    for or joining something soon. Most reminders are actionable. Use informational
+    only for passive context or summaries. Only set an explicit fallback when the
+    request itself gives a time, date, or deadline.
     """
 
     private static func prompt(for request: NudgeInferenceRequest) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = TimeZone(identifier: request.timeZoneIdentifier) ?? .current
         let reference = formatter.string(from: request.referenceDate)
+        let applications = request.installedApplications.isEmpty
+            ? "(no installed applications were provided)"
+            : request.installedApplications
+                .map { "\($0.name) | \($0.bundleIdentifier)" }
+                .joined(separator: "\n")
 
         return """
         Reminder request: \(request.text)
@@ -257,16 +341,23 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
         Time zone: \(request.timeZoneIdentifier)
         App fallback preference when no explicit time is stated: \(request.fallbackDays) days
 
-        Allowed identifiers by context:
+        Installed applications, formatted as name | bundle identifier:
+        \(applications)
+
+        Allowed broad identifiers by context:
         messaging: com.tinyspeck.slackmacgap, com.apple.MobileSMS, com.microsoft.teams2, slack.com, messages.google.com
         onlineShopping: amazon.com, ebay.com, walmart.com, etsy.com, target.com
         calendar: calendar:any, com.apple.iCal, com.flexibits.fantastical2.mac, com.microsoft.Outlook
         browser: context:any-browser, com.apple.Safari, com.google.Chrome, company.thebrowser.Browser, org.mozilla.firefox, com.microsoft.edgemac
         productivity: context:any-work
 
-        For a named supported app or store, return only its exact identifier and mark
-        the source explicit. Otherwise use the broad identifiers appropriate to the
-        selected context and mark the source inferred.
+        When the request names an installed application, set hasTargetApplication to
+        true and return its exact listed bundle identifier. Otherwise set it to false
+        and return an empty targetApplicationBundleIdentifier.
+
+        For a named supported store or broad context, return only allowed identifiers
+        and mark the source explicit. Otherwise use broad identifiers appropriate to
+        the selected context and mark the source inferred.
 
         If the person gives an explicit time or date, calculate fallbackDelayMinutes
         as whole minutes after the reference date. Otherwise set hasExplicitFallback
@@ -293,7 +384,7 @@ private struct AppleGeneratedNudge {
     var context: AppleGeneratedContext
 
     @Guide(
-        description: "Only identifiers from the allowed identifier list in the prompt",
+        description: "Only identifiers from the allowed broad identifier list in the prompt",
         .maximumCount(5)
     )
     var identifiers: [String]
@@ -313,6 +404,11 @@ private struct AppleGeneratedNudge {
 
     @Guide(description: "Whole minutes after the reference time, or zero")
     var fallbackDelayMinutes: Int
+
+    var hasTargetApplication: Bool
+
+    @Guide(description: "An exact installed bundle identifier from the prompt, or an empty string")
+    var targetApplicationBundleIdentifier: String
 }
 
 @Generable
@@ -364,7 +460,9 @@ private extension AppleIntelligenceDraft {
             primaryURL: generated.primaryURL,
             canInterruptFocus: generated.canInterruptFocus,
             hasExplicitFallback: generated.hasExplicitFallback,
-            fallbackDelayMinutes: generated.fallbackDelayMinutes
+            fallbackDelayMinutes: generated.fallbackDelayMinutes,
+            hasTargetApplication: generated.hasTargetApplication,
+            targetApplicationBundleIdentifier: generated.targetApplicationBundleIdentifier
         )
     }
 }
