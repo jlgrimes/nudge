@@ -84,6 +84,13 @@ struct NudgeSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Intelligence") {
+                LabeledContent("Default provider", value: "Apple Intelligence")
+                Text("Requests are interpreted by Apple’s on-device foundation model. If it is unavailable, Nudge automatically uses its local rule-based parser.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Capture") {
                 LabeledContent("Global shortcut", value: "⌥ Space")
                 Text("App activity is matched locally on this Mac. Nudge does not require Accessibility access.")
@@ -98,6 +105,6 @@ struct NudgeSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 320)
+        .frame(width: 440, height: 390)
     }
 }
