@@ -6,19 +6,22 @@ struct NudgeInferenceRequest: Codable, Equatable, Sendable {
     let fallbackDays: Int
     let localeIdentifier: String
     let timeZoneIdentifier: String
+    let installedApplications: [InstalledApplicationDescriptor]
 
     init(
         text: String,
         referenceDate: Date = .now,
         fallbackDays: Int,
         localeIdentifier: String = Locale.current.identifier,
-        timeZoneIdentifier: String = TimeZone.current.identifier
+        timeZoneIdentifier: String = TimeZone.current.identifier,
+        installedApplications: [InstalledApplicationDescriptor] = []
     ) {
         self.text = text
         self.referenceDate = referenceDate
         self.fallbackDays = min(max(fallbackDays, 1), 7)
         self.localeIdentifier = localeIdentifier
         self.timeZoneIdentifier = timeZoneIdentifier
+        self.installedApplications = installedApplications
     }
 }
 
@@ -52,7 +55,12 @@ struct MockLLMInferenceProvider: NudgeInferenceProvider {
     let id = "mock-rule-based"
 
     func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult {
-        ContextInferenceEngine.infer(from: request.text)
+        let result = ContextInferenceEngine.infer(from: request.text)
+        guard let application = ApplicationMentionResolver.bestMatch(
+            in: request.text,
+            applications: request.installedApplications
+        ) else { return result }
+        return result.targeting(application)
     }
 }
 
@@ -88,13 +96,19 @@ struct NudgeInferenceService: Sendable {
         provider: FallbackInferenceProvider(
             id: "apple-intelligence-with-rule-fallback",
             primary: AppleIntelligenceInferenceProvider()
-        )
+        ),
+        applicationCatalog: InstalledApplicationCatalog.live
     )
 
     private let provider: any NudgeInferenceProvider
+    private let applicationCatalog: any InstalledApplicationProviding
 
-    init(provider: any NudgeInferenceProvider) {
+    init(
+        provider: any NudgeInferenceProvider,
+        applicationCatalog: any InstalledApplicationProviding = StaticInstalledApplicationCatalog(values: [])
+    ) {
         self.provider = provider
+        self.applicationCatalog = applicationCatalog
     }
 
     func infer(
@@ -107,12 +121,17 @@ struct NudgeInferenceService: Sendable {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { throw NudgeInferenceError.emptyRequest }
 
+        let installedApplications = await applicationCatalog.applications()
         let request = NudgeInferenceRequest(
             text: normalized,
             referenceDate: referenceDate,
             fallbackDays: fallbackDays,
             localeIdentifier: locale.identifier,
-            timeZoneIdentifier: timeZone.identifier
+            timeZoneIdentifier: timeZone.identifier,
+            installedApplications: Self.relevantApplications(
+                for: normalized,
+                from: installedApplications
+            )
         )
         let result = try await provider.infer(request)
         try validate(result)
@@ -124,11 +143,56 @@ struct NudgeInferenceService: Sendable {
         guard !result.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NudgeInferenceError.invalidResponse("missing title")
         }
-        guard !result.triggers.isEmpty else {
-            throw NudgeInferenceError.invalidResponse("missing trigger")
+        guard !result.conditions.isEmpty else {
+            throw NudgeInferenceError.invalidResponse("missing condition")
         }
         guard result.triggers.allSatisfy({ (0...1).contains($0.confidence) }) else {
             throw NudgeInferenceError.invalidResponse("confidence must be between zero and one")
         }
+    }
+
+    private static func relevantApplications(
+        for text: String,
+        from applications: [InstalledApplicationDescriptor]
+    ) -> [InstalledApplicationDescriptor] {
+        let mentioned = ApplicationMentionResolver.matches(in: text, applications: applications)
+        let mentionedIDs = Set(mentioned.map(\.bundleIdentifier))
+        let remaining = applications.filter { !mentionedIDs.contains($0.bundleIdentifier) }
+        return Array((mentioned + remaining).prefix(120))
+    }
+}
+
+enum ApplicationMentionResolver {
+    static func bestMatch(
+        in text: String,
+        applications: [InstalledApplicationDescriptor]
+    ) -> InstalledApplicationDescriptor? {
+        matches(in: text, applications: applications).first
+    }
+
+    static func matches(
+        in text: String,
+        applications: [InstalledApplicationDescriptor]
+    ) -> [InstalledApplicationDescriptor] {
+        let normalizedText = text.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+
+        return applications
+            .filter { application in
+                let normalizedName = application.name.folding(
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    locale: .current
+                )
+                guard normalizedName.count >= 3 else { return false }
+                return normalizedText.range(of: normalizedName) != nil
+            }
+            .sorted {
+                if $0.name.count != $1.name.count {
+                    return $0.name.count > $1.name.count
+                }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
     }
 }
