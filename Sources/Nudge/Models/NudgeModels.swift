@@ -62,19 +62,22 @@ struct ContextTrigger: Identifiable, Hashable, Codable, Sendable {
     let identifiers: [String]
     let confidence: Double
     let source: TriggerSource
+    let applicationName: String?
 
     init(
         id: UUID = UUID(),
         kind: ContextKind,
         identifiers: [String],
         confidence: Double,
-        source: TriggerSource
+        source: TriggerSource,
+        applicationName: String? = nil
     ) {
         self.id = id
         self.kind = kind
         self.identifiers = identifiers
         self.confidence = confidence
         self.source = source
+        self.applicationName = applicationName
     }
 }
 
@@ -118,12 +121,13 @@ enum NudgeCondition: Hashable, Codable, Sendable {
 
     var legacyTrigger: ContextTrigger {
         switch self {
-        case .applicationActivated(let bundleIdentifier, _):
+        case .applicationActivated(let bundleIdentifier, let applicationName):
             ContextTrigger(
                 kind: .application,
                 identifiers: [bundleIdentifier],
                 confidence: 1,
-                source: .explicit
+                source: .explicit,
+                applicationName: applicationName
             )
         case .context(let trigger):
             trigger
@@ -139,13 +143,17 @@ enum NudgeCondition: Hashable, Codable, Sendable {
 }
 
 enum NudgeAction: Hashable, Codable, Sendable {
-    case openApplication(bundleIdentifier: String, applicationName: String)
+    case openApplication(
+        bundleIdentifier: String,
+        applicationName: String,
+        applicationURL: URL
+    )
     case openURL(URL)
     case none
 
     var label: String {
         switch self {
-        case .openApplication(_, let applicationName):
+        case .openApplication(_, let applicationName, _):
             "Open \(applicationName)"
         case .openURL(let url):
             "Open \(url.host ?? "link")"
@@ -159,6 +167,14 @@ enum NudgeAction: Hashable, Codable, Sendable {
         case .openApplication: "arrow.up.forward.app"
         case .openURL: "arrow.up.forward.square"
         case .none: "circle"
+        }
+    }
+
+    var targetURL: URL? {
+        switch self {
+        case .openApplication(_, _, let applicationURL): applicationURL
+        case .openURL(let url): url
+        case .none: nil
         }
     }
 }
@@ -224,19 +240,50 @@ struct NudgeItem: Identifiable, Hashable, Codable, Sendable {
         primaryURL: URL? = nil,
         canInterruptFocus: Bool = false
     ) {
+        let applicationTrigger = triggers.first { $0.kind == .application }
+        let decodedConditions = triggers.compactMap { trigger -> NudgeCondition? in
+            if
+                trigger.kind == .application,
+                let bundleIdentifier = trigger.identifiers.first
+            {
+                return .applicationActivated(
+                    bundleIdentifier: bundleIdentifier,
+                    applicationName: trigger.applicationName ?? bundleIdentifier
+                )
+            }
+            return .context(trigger)
+        }
+
+        let decodedAction: NudgeAction
+        if
+            let applicationTrigger,
+            let bundleIdentifier = applicationTrigger.identifiers.first,
+            let primaryURL
+        {
+            decodedAction = .openApplication(
+                bundleIdentifier: bundleIdentifier,
+                applicationName: applicationTrigger.applicationName ?? bundleIdentifier,
+                applicationURL: primaryURL
+            )
+        } else if let primaryURL {
+            decodedAction = .openURL(primaryURL)
+        } else {
+            decodedAction = .none
+        }
+
         self.init(
             id: id,
             originalRequest: originalRequest,
             title: title,
             detail: detail,
             priority: priority,
-            conditions: triggers.map(NudgeCondition.context),
+            conditions: decodedConditions,
             fallbackAt: fallbackAt,
             createdAt: createdAt,
             status: status,
             surfacedAt: surfacedAt,
             invocation: invocation,
-            action: primaryURL.map(NudgeAction.openURL) ?? .none,
+            action: decodedAction,
             canInterruptFocus: canInterruptFocus
         )
     }
@@ -246,8 +293,7 @@ struct NudgeItem: Identifiable, Hashable, Codable, Sendable {
     }
 
     var primaryURL: URL? {
-        guard case .openURL(let url) = action else { return nil }
-        return url
+        action.targetURL
     }
 
     var contextLabel: String {
