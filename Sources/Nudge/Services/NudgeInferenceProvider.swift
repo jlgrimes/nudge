@@ -63,7 +63,15 @@ enum NudgeInferenceError: LocalizedError, Equatable {
 
 protocol NudgeInferenceProvider: Sendable {
     var id: String { get }
-    func infer(_ request: NudgeInferenceRequest) async throws -> NudgeProviderInferenceResponse
+    func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult
+}
+
+/// Optional diagnostics supplied by composed providers. The core provider
+/// contract remains a black box returning only an InferenceResult.
+protocol NudgeInferenceProvenanceProviding: Sendable {
+    func inferWithProvenance(
+        _ request: NudgeInferenceRequest
+    ) async throws -> NudgeProviderInferenceResponse
 }
 
 /// A deterministic offline provider. It obeys the same asynchronous provider
@@ -71,27 +79,20 @@ protocol NudgeInferenceProvider: Sendable {
 struct MockLLMInferenceProvider: NudgeInferenceProvider {
     let id = "mock-rule-based"
 
-    func infer(_ request: NudgeInferenceRequest) async throws -> NudgeProviderInferenceResponse {
-        let baseResult = ContextInferenceEngine.infer(from: request.text)
-        let result: InferenceResult
-
-        if let application = ApplicationMentionResolver.bestMatch(
+    func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult {
+        let result = ContextInferenceEngine.infer(from: request.text)
+        guard let application = ApplicationMentionResolver.bestMatch(
             in: request.text,
             applications: request.installedApplications
-        ) {
-            result = baseResult.targeting(application)
-        } else {
-            result = baseResult
-        }
-
-        return NudgeProviderInferenceResponse(result: result, providerID: id)
+        ) else { return result }
+        return result.targeting(application)
     }
 }
 
 /// Composes a preferred provider with a reliable fallback. Apple Intelligence
 /// can be unavailable because of device eligibility, settings, or model state;
 /// reminder creation should remain usable in all of those cases.
-struct FallbackInferenceProvider: NudgeInferenceProvider {
+struct FallbackInferenceProvider: NudgeInferenceProvider, NudgeInferenceProvenanceProviding {
     let id: String
     private let primary: any NudgeInferenceProvider
     private let fallback: any NudgeInferenceProvider
@@ -106,14 +107,22 @@ struct FallbackInferenceProvider: NudgeInferenceProvider {
         self.fallback = fallback
     }
 
-    func infer(_ request: NudgeInferenceRequest) async throws -> NudgeProviderInferenceResponse {
+    func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult {
+        try await inferWithProvenance(request).result
+    }
+
+    func inferWithProvenance(
+        _ request: NudgeInferenceRequest
+    ) async throws -> NudgeProviderInferenceResponse {
         do {
-            return try await primary.infer(request)
-        } catch {
-            let fallbackResponse = try await fallback.infer(request)
             return NudgeProviderInferenceResponse(
-                result: fallbackResponse.result,
-                providerID: fallbackResponse.providerID,
+                result: try await primary.infer(request),
+                providerID: primary.id
+            )
+        } catch {
+            return NudgeProviderInferenceResponse(
+                result: try await fallback.infer(request),
+                providerID: fallback.id,
                 fallbackReason: error.localizedDescription
             )
         }
@@ -162,7 +171,16 @@ struct NudgeInferenceService: Sendable {
                 from: installedApplications
             )
         )
-        let providerResponse = try await provider.infer(request)
+
+        let providerResponse: NudgeProviderInferenceResponse
+        if let provenanceProvider = provider as? any NudgeInferenceProvenanceProviding {
+            providerResponse = try await provenanceProvider.inferWithProvenance(request)
+        } else {
+            providerResponse = NudgeProviderInferenceResponse(
+                result: try await provider.infer(request),
+                providerID: provider.id
+            )
+        }
         try validate(providerResponse.result)
 
         return NudgeInferenceResponse(
