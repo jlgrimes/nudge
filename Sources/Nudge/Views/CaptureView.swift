@@ -87,7 +87,12 @@ struct CaptureView: View {
     private func confirmation(_ item: NudgeItem) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 5) {
-                Label(item.contextLabel, systemImage: item.triggers.first?.kind.symbol ?? "sparkles")
+                Label(item.contextLabel, systemImage: item.conditions.first?.kind.symbol ?? "sparkles")
+
+                if item.action != .none {
+                    Label(item.action.label, systemImage: item.action.symbol)
+                }
+
                 Label(
                     "Fallback \(item.fallbackAt.formatted(date: .abbreviated, time: .shortened))",
                     systemImage: "clock"
