@@ -153,6 +153,10 @@ enum ContextInferenceEngine {
     }
 
     static func matches(_ event: ContextEvent, trigger: ContextTrigger) -> Bool {
+        if trigger.kind == .onlineShopping, event.kind == .browser {
+            return event.identifiers.contains("context:any-browser")
+        }
+
         guard event.kind == trigger.kind else { return false }
         return !event.identifiers.isDisjoint(with: Set(trigger.identifiers))
     }
