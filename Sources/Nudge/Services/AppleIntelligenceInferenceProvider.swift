@@ -165,7 +165,8 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
             ]
             action = .openApplication(
                 bundleIdentifier: targetApplication.bundleIdentifier,
-                applicationName: targetApplication.name
+                applicationName: targetApplication.name,
+                applicationURL: targetApplication.applicationURL
             )
             defaultResultDetail = "When \(targetApplication.name) is active"
         } else {
