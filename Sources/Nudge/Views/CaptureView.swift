@@ -47,12 +47,14 @@ struct CaptureView: View {
                 .focused($isInputFocused)
                 .onSubmit(store.createNudgeFromCapture)
 
-            Button(action: store.simulateVoiceCapture) {
-                Image(systemName: store.isListening ? "waveform" : "mic.fill")
-                    .symbolEffect(.variableColor.iterative, isActive: store.isListening)
+            if NudgeRuntime.debugToolsEnabled {
+                Button(action: store.simulateVoiceCapture) {
+                    Image(systemName: store.isListening ? "waveform" : "mic.fill")
+                        .symbolEffect(.variableColor.iterative, isActive: store.isListening)
+                }
+                .buttonStyle(.bordered)
+                .help("Simulate voice capture")
             }
-            .buttonStyle(.bordered)
-            .help("Simulate Voice Capture")
 
             Button("Add", action: store.createNudgeFromCapture)
                 .buttonStyle(.borderedProminent)
