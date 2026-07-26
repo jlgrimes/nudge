@@ -177,6 +177,24 @@ final class NudgeStore {
         await createNudge(from: request, source: .capture)
     }
 
+    func commitCapturePreview() {
+        guard let item = capturePreview else { return }
+        nudges.append(item)
+        capturePreview = nil
+        captureDraft = ""
+        inferenceErrorMessage = nil
+        activeContextLabel = "Saved · waiting for context"
+        presentation = .expanded
+    }
+
+    func reviseCapturePreview() {
+        guard let item = capturePreview else { return }
+        captureDraft = item.originalRequest
+        capturePreview = nil
+        inferenceErrorMessage = nil
+        activeContextLabel = "Edit your request"
+    }
+
     private func createNudge(from request: String, source: CreationSource) async {
         guard !isInferring else { return }
 
@@ -208,9 +226,7 @@ final class NudgeStore {
                 let item = makeNudge(
                     request: request,
                     inference: inference,
-                    fallbackAt: fallbackAt,
-                    status: .active,
-                    surfacedAt: referenceDate
+                    fallbackAt: fallbackAt
                 )
                 quickAddDraft = ""
                 withAnimation(.smooth(duration: 0.28)) {
@@ -220,18 +236,15 @@ final class NudgeStore {
                         presentation = .collapsed
                     }
                 }
-                emphasize([item.id])
-                activeContextLabel = "Added to your nudges"
+                activeContextLabel = "Added · waiting for context"
 
             case .capture:
-                let item = makeNudge(
+                capturePreview = makeNudge(
                     request: request,
                     inference: inference,
                     fallbackAt: fallbackAt
                 )
-                nudges.append(item)
-                capturePreview = item
-                activeContextLabel = "Saved with inferred context"
+                activeContextLabel = "Review inferred nudge"
             }
         } catch is CancellationError {
             return
@@ -253,11 +266,11 @@ final class NudgeStore {
             title: inference.title,
             detail: inference.detail,
             priority: inference.priority,
-            triggers: inference.triggers,
+            conditions: inference.conditions,
             fallbackAt: fallbackAt,
             status: status,
             surfacedAt: surfacedAt,
-            primaryURL: inference.primaryURL,
+            action: inference.action,
             canInterruptFocus: inference.canInterruptFocus
         )
     }
@@ -279,7 +292,7 @@ final class NudgeStore {
 
         let matchingIDs = nudges.compactMap { item -> UUID? in
             guard item.status == .pending else { return nil }
-            let matches = item.triggers.contains { ContextInferenceEngine.matches(event, trigger: $0) }
+            let matches = item.conditions.contains { $0.matches(event) }
             return matches ? item.id : nil
         }
 
