@@ -26,6 +26,22 @@ enum ContextInferenceEngine {
         "target.com"
     ]
 
+    private static let calendarIdentifiers = [
+        "calendar:any",
+        "com.apple.iCal",
+        "com.flexibits.fantastical2.mac",
+        "com.microsoft.Outlook"
+    ]
+
+    private static let browserIdentifiers = [
+        "context:any-browser",
+        "com.apple.Safari",
+        "com.google.Chrome",
+        "company.thebrowser.Browser",
+        "org.mozilla.firefox",
+        "com.microsoft.edgemac"
+    ]
+
     static func infer(from request: String) -> InferenceResult {
         let normalized = request
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -70,12 +86,50 @@ enum ContextInferenceEngine {
                     source: isExplicit ? .explicit : .inferred
                 )
             ]
+            let primaryURL = explicitDomains.first.flatMap { URL(string: "https://\($0)") }
 
             return InferenceResult(
                 title: sentenceCase(normalized),
                 detail: isExplicit ? "On the specified store" : "While you’re shopping online",
                 priority: .actionable,
                 triggers: triggers,
+                primaryURL: primaryURL,
+                canInterruptFocus: false
+            )
+        }
+
+        if containsAny(lowercased, ["meeting", "appointment", "calendar", "standup", "call starts", "before the call"]) {
+            let isUrgent = containsAny(lowercased, ["leave for", "join", "starts", "urgent"])
+            return InferenceResult(
+                title: sentenceCase(normalized),
+                detail: "When your calendar is active",
+                priority: isUrgent ? .urgent : .actionable,
+                triggers: [
+                    ContextTrigger(
+                        kind: .calendar,
+                        identifiers: calendarIdentifiers,
+                        confidence: 0.84,
+                        source: .inferred
+                    )
+                ],
+                primaryURL: nil,
+                canInterruptFocus: isUrgent
+            )
+        }
+
+        if containsAny(lowercased, ["look up", "research", "read online", "website", "browse", "check online"]) {
+            return InferenceResult(
+                title: sentenceCase(normalized),
+                detail: "When you’re browsing",
+                priority: .actionable,
+                triggers: [
+                    ContextTrigger(
+                        kind: .browser,
+                        identifiers: browserIdentifiers,
+                        confidence: 0.8,
+                        source: .inferred
+                    )
+                ],
                 primaryURL: nil,
                 canInterruptFocus: false
             )
