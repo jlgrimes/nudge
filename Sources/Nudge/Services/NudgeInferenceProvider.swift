@@ -46,8 +46,8 @@ protocol NudgeInferenceProvider: Sendable {
     func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult
 }
 
-/// The current stand-in for an LLM. It obeys the same asynchronous provider
-/// contract as a remote or local model, but delegates to deterministic rules.
+/// A deterministic offline provider. It obeys the same asynchronous provider
+/// contract as a model, but delegates to the local rule engine.
 struct MockLLMInferenceProvider: NudgeInferenceProvider {
     let id = "mock-rule-based"
 
@@ -56,8 +56,9 @@ struct MockLLMInferenceProvider: NudgeInferenceProvider {
     }
 }
 
-/// Composes a preferred provider with a reliable fallback. A future network
-/// provider can fail offline without making reminder creation unavailable.
+/// Composes a preferred provider with a reliable fallback. Apple Intelligence
+/// can be unavailable because of device eligibility, settings, or model state;
+/// reminder creation should remain usable in all of those cases.
 struct FallbackInferenceProvider: NudgeInferenceProvider {
     let id: String
     private let primary: any NudgeInferenceProvider
@@ -83,7 +84,12 @@ struct FallbackInferenceProvider: NudgeInferenceProvider {
 }
 
 struct NudgeInferenceService: Sendable {
-    static let live = NudgeInferenceService(provider: MockLLMInferenceProvider())
+    static let live = NudgeInferenceService(
+        provider: FallbackInferenceProvider(
+            id: "apple-intelligence-with-rule-fallback",
+            primary: AppleIntelligenceInferenceProvider()
+        )
+    )
 
     private let provider: any NudgeInferenceProvider
 
