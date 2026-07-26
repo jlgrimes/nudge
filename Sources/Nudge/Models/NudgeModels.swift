@@ -15,7 +15,7 @@ enum NudgeStatus: String, Codable, Sendable {
     case expired
 }
 
-enum NudgeInvocation: Hashable, Sendable {
+enum NudgeInvocation: Hashable, Codable, Sendable {
     case temporal
     case contextual(ContextKind)
 }
@@ -75,7 +75,7 @@ struct ContextTrigger: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
-struct NudgeItem: Identifiable, Hashable, Sendable {
+struct NudgeItem: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let originalRequest: String
     let title: String
@@ -160,7 +160,7 @@ struct ContextEvent: Identifiable, Hashable, Sendable {
         id: "calendar",
         kind: .calendar,
         label: "A meeting starts soon",
-        identifiers: ["calendar.urgent"]
+        identifiers: ["calendar.urgent", "calendar:any"]
     )
 
     static func activatedApplication(bundleIdentifier: String, name: String) -> ContextEvent? {
@@ -169,6 +169,28 @@ struct ContextEvent: Identifiable, Hashable, Sendable {
             "com.apple.MobileSMS",
             "com.microsoft.teams2"
         ]
+        let calendarBundleIDs: Set<String> = [
+            "com.apple.iCal",
+            "com.flexibits.fantastical2.mac",
+            "com.microsoft.Outlook"
+        ]
+        let browserBundleIDs: Set<String> = [
+            "com.apple.Safari",
+            "com.google.Chrome",
+            "company.thebrowser.Browser",
+            "org.mozilla.firefox",
+            "com.microsoft.edgemac"
+        ]
+        let productivityBundleIDs: Set<String> = [
+            "com.apple.dt.Xcode",
+            "com.microsoft.VSCode",
+            "com.todesktop.230313mzl4w4u92",
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "com.figma.Desktop",
+            "notion.id",
+            "com.linear"
+        ]
 
         if messagingBundleIDs.contains(bundleIdentifier) {
             return ContextEvent(
@@ -176,6 +198,33 @@ struct ContextEvent: Identifiable, Hashable, Sendable {
                 kind: .messaging,
                 label: "\(name) is active",
                 identifiers: [bundleIdentifier]
+            )
+        }
+
+        if calendarBundleIDs.contains(bundleIdentifier) {
+            return ContextEvent(
+                id: "app:\(bundleIdentifier)",
+                kind: .calendar,
+                label: "\(name) is active",
+                identifiers: [bundleIdentifier, "calendar:any"]
+            )
+        }
+
+        if browserBundleIDs.contains(bundleIdentifier) {
+            return ContextEvent(
+                id: "app:\(bundleIdentifier)",
+                kind: .browser,
+                label: "\(name) is active",
+                identifiers: [bundleIdentifier, "context:any-browser"]
+            )
+        }
+
+        if productivityBundleIDs.contains(bundleIdentifier) {
+            return ContextEvent(
+                id: "app:\(bundleIdentifier)",
+                kind: .productivity,
+                label: "\(name) is active",
+                identifiers: [bundleIdentifier, "context:any-work"]
             )
         }
 
