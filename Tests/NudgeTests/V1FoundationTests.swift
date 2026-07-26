@@ -70,6 +70,33 @@ final class V1FoundationTests: XCTestCase {
         XCTAssertEqual(applicationURL, discord.applicationURL)
     }
 
+    func testApplicationMentionResolverRequiresNameBoundaries() {
+        let mail = InstalledApplicationDescriptor(
+            bundleIdentifier: "com.apple.mail",
+            name: "Mail",
+            applicationURL: URL(fileURLWithPath: "/System/Applications/Mail.app")
+        )
+        let arc = InstalledApplicationDescriptor(
+            bundleIdentifier: "company.thebrowser.Browser",
+            name: "Arc",
+            applicationURL: URL(fileURLWithPath: "/Applications/Arc.app")
+        )
+
+        XCTAssertNil(
+            ApplicationMentionResolver.bestMatch(
+                in: "Remind me to email Alex after I search",
+                applications: [mail, arc]
+            )
+        )
+        XCTAssertEqual(
+            ApplicationMentionResolver.bestMatch(
+                in: "Remind me when I open Mail",
+                applications: [mail, arc]
+            )?.bundleIdentifier,
+            "com.apple.mail"
+        )
+    }
+
     @MainActor
     func testExactApplicationConditionSurfacesOnlyForThatApplication() {
         let item = NudgeItem(
