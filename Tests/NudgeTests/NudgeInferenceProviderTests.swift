@@ -22,7 +22,7 @@ final class NudgeInferenceProviderTests: XCTestCase {
     }
 
     @MainActor
-    func testStoreUsesInjectedProviderWithoutKnowingItsImplementation() async {
+    func testStoreReviewsInjectedProviderOutputBeforeCommittingIt() async {
         let exactFallback = Date.now.addingTimeInterval(1_234)
         let provider = StubProvider(
             id: "future-llm",
@@ -51,13 +51,21 @@ final class NudgeInferenceProviderTests: XCTestCase {
 
         await store.createNudgeFromCaptureNow()
 
-        XCTAssertEqual(store.nudges.count, 1)
-        XCTAssertEqual(store.nudges.first?.title, "Provider-generated title")
-        XCTAssertEqual(store.nudges.first?.triggers.first?.identifiers, ["com.figma.Desktop"])
-        XCTAssertEqual(store.nudges.first?.fallbackAt, exactFallback)
-        XCTAssertEqual(store.nudges.first?.primaryURL?.absoluteString, "https://figma.com")
-        XCTAssertTrue(store.nudges.first?.canInterruptFocus == true)
+        XCTAssertTrue(store.nudges.isEmpty)
+        XCTAssertEqual(store.capturePreview?.title, "Provider-generated title")
+        XCTAssertEqual(store.capturePreview?.triggers.first?.identifiers, ["com.figma.Desktop"])
+        XCTAssertEqual(store.capturePreview?.fallbackAt, exactFallback)
+        XCTAssertEqual(store.capturePreview?.primaryURL?.absoluteString, "https://figma.com")
+        XCTAssertTrue(store.capturePreview?.canInterruptFocus == true)
+        XCTAssertEqual(store.activeContextLabel, "Review inferred nudge")
         XCTAssertEqual(store.lastInferenceProviderID, "future-llm")
+
+        store.commitCapturePreview()
+
+        XCTAssertNil(store.capturePreview)
+        XCTAssertEqual(store.nudges.count, 1)
+        XCTAssertEqual(store.nudges.first?.status, .pending)
+        XCTAssertEqual(store.presentation, .expanded)
     }
 
     func testFallbackProviderUsesMockWhenPrimaryFails() async throws {
