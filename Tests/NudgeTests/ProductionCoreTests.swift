@@ -48,6 +48,20 @@ final class ProductionCoreTests: XCTestCase {
         XCTAssertEqual(inference.primaryURL?.absoluteString, "https://amazon.com")
     }
 
+    func testShoppingIntentMatchesBroadBrowserActivation() {
+        let inference = ContextInferenceEngine.infer(
+            from: "Remind me to order coffee filters"
+        )
+        let event = ContextEvent.activatedApplication(
+            bundleIdentifier: "com.google.Chrome",
+            name: "Google Chrome"
+        )
+
+        XCTAssertTrue(
+            event.map { ContextInferenceEngine.matches($0, trigger: inference.triggers[0]) } == true
+        )
+    }
+
     @MainActor
     func testRuntimeLoadsAndPersistsState() throws {
         let stateURL = temporaryStateURL()
