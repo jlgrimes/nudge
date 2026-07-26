@@ -232,8 +232,8 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
 
     #if canImport(FoundationModels)
     private static let instructions = """
-    You convert a person's reminder request into one concise contextual nudge.
-    Return only the guided structure requested by the app.
+    Convert one reminder request into one concise contextual nudge. Return only the
+    guided structure. Write the title and detail in the same language as the request.
 
     Choose the context in which the reminder is most useful. Use an explicit app,
     website, date, or time only when the person actually names or clearly implies it.
@@ -241,10 +241,8 @@ struct AppleIntelligenceInferenceProvider: NudgeInferenceProvider {
 
     Urgent means the reminder is time-sensitive enough to interrupt Focus, such as
     leaving for or joining something soon. Most reminders are actionable. Use
-    informational only for passive context or summaries.
-
-    Only set an explicit fallback when the request itself gives a time, date, or
-    deadline. Otherwise let the app use its configured fallback.
+    informational only for passive context or summaries. Only set an explicit fallback
+    when the request itself gives a time, date, or deadline.
     """
 
     private static func prompt(for request: NudgeInferenceRequest) -> String {
