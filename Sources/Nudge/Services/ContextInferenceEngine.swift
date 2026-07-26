@@ -1,14 +1,37 @@
 import Foundation
 
-struct InferenceResult: Sendable {
+/// Provider-neutral structured output. Remote LLM providers, local models, and
+/// deterministic mocks all return this same shape.
+struct InferenceResult: Codable, Equatable, Sendable {
     let title: String
     let detail: String
     let priority: NudgePriority
     let triggers: [ContextTrigger]
     let primaryURL: URL?
     let canInterruptFocus: Bool
+    let fallbackAt: Date?
+
+    init(
+        title: String,
+        detail: String,
+        priority: NudgePriority,
+        triggers: [ContextTrigger],
+        primaryURL: URL?,
+        canInterruptFocus: Bool,
+        fallbackAt: Date? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.priority = priority
+        self.triggers = triggers
+        self.primaryURL = primaryURL
+        self.canInterruptFocus = canInterruptFocus
+        self.fallbackAt = fallbackAt
+    }
 }
 
+/// Deterministic parser used by MockLLMInferenceProvider. Matching stays here
+/// because it is application domain logic, not provider-specific behavior.
 enum ContextInferenceEngine {
     private static let messagingIdentifiers = [
         "com.tinyspeck.slackmacgap",
@@ -56,20 +79,18 @@ enum ContextInferenceEngine {
         if containsAny(lowercased, ["message", "text", "reply", "dm", "send a note"]) {
             let explicitApps = explicitMessagingIdentifiers(in: lowercased)
             let isExplicit = !explicitApps.isEmpty
-            let triggers = [
-                ContextTrigger(
-                    kind: .messaging,
-                    identifiers: isExplicit ? explicitApps : messagingIdentifiers,
-                    confidence: isExplicit ? 1 : 0.87,
-                    source: isExplicit ? .explicit : .inferred
-                )
-            ]
-
             return InferenceResult(
                 title: sentenceCase(normalized),
                 detail: isExplicit ? "When the specified messaging app is active" : "When you’re messaging",
                 priority: .actionable,
-                triggers: triggers,
+                triggers: [
+                    ContextTrigger(
+                        kind: .messaging,
+                        identifiers: isExplicit ? explicitApps : messagingIdentifiers,
+                        confidence: isExplicit ? 1 : 0.87,
+                        source: isExplicit ? .explicit : .inferred
+                    )
+                ],
                 primaryURL: nil,
                 canInterruptFocus: false
             )
@@ -78,21 +99,19 @@ enum ContextInferenceEngine {
         if containsAny(lowercased, ["buy", "order", "shop", "purchase", "find a price"]) {
             let explicitDomains = shoppingIdentifiers.filter { lowercased.contains(domainName($0)) }
             let isExplicit = !explicitDomains.isEmpty
-            let triggers = [
-                ContextTrigger(
-                    kind: .onlineShopping,
-                    identifiers: isExplicit ? explicitDomains : shoppingIdentifiers,
-                    confidence: isExplicit ? 1 : 0.9,
-                    source: isExplicit ? .explicit : .inferred
-                )
-            ]
             let primaryURL = explicitDomains.first.flatMap { URL(string: "https://\($0)") }
-
             return InferenceResult(
                 title: sentenceCase(normalized),
                 detail: isExplicit ? "On the specified store" : "While you’re shopping online",
                 priority: .actionable,
-                triggers: triggers,
+                triggers: [
+                    ContextTrigger(
+                        kind: .onlineShopping,
+                        identifiers: isExplicit ? explicitDomains : shoppingIdentifiers,
+                        confidence: isExplicit ? 1 : 0.9,
+                        source: isExplicit ? .explicit : .inferred
+                    )
+                ],
                 primaryURL: primaryURL,
                 canInterruptFocus: false
             )
