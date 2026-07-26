@@ -16,6 +16,7 @@ final class NudgeInferenceProviderTests: XCTestCase {
         )
 
         XCTAssertEqual(response.providerID, "echo")
+        XCTAssertNil(response.fallbackReason)
         XCTAssertEqual(response.result.title, "Remind me to review the launch plan")
         XCTAssertEqual(response.result.detail, "4 · en_US · America/Detroit")
         XCTAssertEqual(response.result.fallbackAt, referenceDate.addingTimeInterval(600))
@@ -68,7 +69,7 @@ final class NudgeInferenceProviderTests: XCTestCase {
         XCTAssertEqual(store.presentation, .expanded)
     }
 
-    func testFallbackProviderUsesMockWhenPrimaryFails() async throws {
+    func testFallbackProviderReportsTheProviderActuallyUsed() async throws {
         let provider = FallbackInferenceProvider(
             primary: FailingProvider(),
             fallback: MockLLMInferenceProvider()
@@ -80,7 +81,8 @@ final class NudgeInferenceProviderTests: XCTestCase {
             fallbackDays: 2
         )
 
-        XCTAssertEqual(response.providerID, "provider-with-fallback")
+        XCTAssertEqual(response.providerID, "mock-rule-based")
+        XCTAssertNotNil(response.fallbackReason)
         XCTAssertEqual(response.result.triggers.first?.kind, .messaging)
         XCTAssertEqual(
             response.result.triggers.first?.identifiers,
@@ -88,7 +90,7 @@ final class NudgeInferenceProviderTests: XCTestCase {
         )
     }
 
-    func testConfiguredAppleProviderFallsBackWithoutChangingTheServiceContract() async throws {
+    func testConfiguredAppleProviderFallsBackWithoutChangingTheResultContract() async throws {
         let provider = FallbackInferenceProvider(
             id: "apple-intelligence-with-rule-fallback",
             primary: FailingProvider(),
@@ -101,7 +103,8 @@ final class NudgeInferenceProviderTests: XCTestCase {
             fallbackDays: 2
         )
 
-        XCTAssertEqual(response.providerID, "apple-intelligence-with-rule-fallback")
+        XCTAssertEqual(response.providerID, "mock-rule-based")
+        XCTAssertNotNil(response.fallbackReason)
         XCTAssertEqual(response.result.triggers.first?.kind, .onlineShopping)
         XCTAssertEqual(response.result.primaryURL, URL(string: "https://amazon.com"))
     }
@@ -172,6 +175,10 @@ private struct FailingProvider: NudgeInferenceProvider {
     }
 }
 
-private enum TestProviderError: Error {
+private enum TestProviderError: LocalizedError {
     case unavailable
+
+    var errorDescription: String? {
+        "The primary provider is unavailable."
+    }
 }
