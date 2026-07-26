@@ -122,12 +122,12 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testQuickAddCreatesAnActiveTimelineNudgeAndCollapsesTheInput() {
+    func testQuickAddCreatesAnActiveTimelineNudgeAndCollapsesTheInput() async {
         let store = NudgeStore(seedDemoData: false)
         store.showQuickAdd()
         store.quickAddDraft = "Review the launch checklist"
 
-        store.createNudgeFromQuickAdd()
+        await store.createNudgeFromQuickAddNow()
 
         XCTAssertFalse(store.isQuickAddExpanded)
         XCTAssertTrue(store.quickAddDraft.isEmpty)
@@ -135,6 +135,7 @@ final class ContextInferenceEngineTests: XCTestCase {
         XCTAssertEqual(store.activeNudges.first?.status, .active)
         XCTAssertEqual(store.activeNudges.first?.invocation, .temporal)
         XCTAssertNotNil(store.activeNudges.first?.surfacedAt)
+        XCTAssertEqual(store.lastInferenceProviderID, "mock-rule-based")
     }
 
     @MainActor
