@@ -25,8 +25,9 @@ Browser-tab contents, calendar-event contents, contacts, messages, voice capture
 - [x] Support Open Application and Open URL actions
 - [x] Add a review-and-correct step before committing a model interpretation
 - [x] Make quick add and full capture use the same pending contextual lifecycle
+- [x] Track and show the inference provider that actually produced a result
+- [ ] Surface the provider fallback reason in diagnostics and Settings
 - [ ] Replace model-owned date arithmetic with deterministic temporal resolution
-- [ ] Show the actual inference provider used and any fallback reason
 
 ## P0 — Reliable delivery
 
