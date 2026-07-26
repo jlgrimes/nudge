@@ -80,6 +80,24 @@ final class NudgeInferenceProviderTests: XCTestCase {
         )
     }
 
+    func testConfiguredAppleProviderFallsBackWithoutChangingTheServiceContract() async throws {
+        let provider = FallbackInferenceProvider(
+            id: "apple-intelligence-with-rule-fallback",
+            primary: FailingProvider(),
+            fallback: MockLLMInferenceProvider()
+        )
+        let service = NudgeInferenceService(provider: provider)
+
+        let response = try await service.infer(
+            text: "Remind me to buy coffee filters on Amazon",
+            fallbackDays: 2
+        )
+
+        XCTAssertEqual(response.providerID, "apple-intelligence-with-rule-fallback")
+        XCTAssertEqual(response.result.triggers.first?.kind, .onlineShopping)
+        XCTAssertEqual(response.result.primaryURL, URL(string: "https://amazon.com"))
+    }
+
     func testServiceRejectsMalformedProviderOutput() async {
         let service = NudgeInferenceService(
             provider: StubProvider(
