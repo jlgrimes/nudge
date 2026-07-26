@@ -28,6 +28,23 @@ struct NudgeInferenceRequest: Codable, Equatable, Sendable {
 struct NudgeInferenceResponse: Equatable, Sendable {
     let result: InferenceResult
     let providerID: String
+    let fallbackReason: String?
+}
+
+struct NudgeProviderInferenceResponse: Equatable, Sendable {
+    let result: InferenceResult
+    let providerID: String
+    let fallbackReason: String?
+
+    init(
+        result: InferenceResult,
+        providerID: String,
+        fallbackReason: String? = nil
+    ) {
+        self.result = result
+        self.providerID = providerID
+        self.fallbackReason = fallbackReason
+    }
 }
 
 enum NudgeInferenceError: LocalizedError, Equatable {
@@ -46,7 +63,7 @@ enum NudgeInferenceError: LocalizedError, Equatable {
 
 protocol NudgeInferenceProvider: Sendable {
     var id: String { get }
-    func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult
+    func infer(_ request: NudgeInferenceRequest) async throws -> NudgeProviderInferenceResponse
 }
 
 /// A deterministic offline provider. It obeys the same asynchronous provider
@@ -54,13 +71,20 @@ protocol NudgeInferenceProvider: Sendable {
 struct MockLLMInferenceProvider: NudgeInferenceProvider {
     let id = "mock-rule-based"
 
-    func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult {
-        let result = ContextInferenceEngine.infer(from: request.text)
-        guard let application = ApplicationMentionResolver.bestMatch(
+    func infer(_ request: NudgeInferenceRequest) async throws -> NudgeProviderInferenceResponse {
+        let baseResult = ContextInferenceEngine.infer(from: request.text)
+        let result: InferenceResult
+
+        if let application = ApplicationMentionResolver.bestMatch(
             in: request.text,
             applications: request.installedApplications
-        ) else { return result }
-        return result.targeting(application)
+        ) {
+            result = baseResult.targeting(application)
+        } else {
+            result = baseResult
+        }
+
+        return NudgeProviderInferenceResponse(result: result, providerID: id)
     }
 }
 
@@ -82,11 +106,16 @@ struct FallbackInferenceProvider: NudgeInferenceProvider {
         self.fallback = fallback
     }
 
-    func infer(_ request: NudgeInferenceRequest) async throws -> InferenceResult {
+    func infer(_ request: NudgeInferenceRequest) async throws -> NudgeProviderInferenceResponse {
         do {
             return try await primary.infer(request)
         } catch {
-            return try await fallback.infer(request)
+            let fallbackResponse = try await fallback.infer(request)
+            return NudgeProviderInferenceResponse(
+                result: fallbackResponse.result,
+                providerID: fallbackResponse.providerID,
+                fallbackReason: error.localizedDescription
+            )
         }
     }
 }
@@ -133,10 +162,14 @@ struct NudgeInferenceService: Sendable {
                 from: installedApplications
             )
         )
-        let result = try await provider.infer(request)
-        try validate(result)
+        let providerResponse = try await provider.infer(request)
+        try validate(providerResponse.result)
 
-        return NudgeInferenceResponse(result: result, providerID: provider.id)
+        return NudgeInferenceResponse(
+            result: providerResponse.result,
+            providerID: providerResponse.providerID,
+            fallbackReason: providerResponse.fallbackReason
+        )
     }
 
     private func validate(_ result: InferenceResult) throws {
@@ -186,13 +219,20 @@ enum ApplicationMentionResolver {
                     locale: .current
                 )
                 guard normalizedName.count >= 3 else { return false }
-                return normalizedText.range(of: normalizedName) != nil
+
+                let escapedName = NSRegularExpression.escapedPattern(for: normalizedName)
+                let pattern = "(?<![\\p{L}\\p{N}])\(escapedName)(?![\\p{L}\\p{N}])"
+                return normalizedText.range(of: pattern, options: .regularExpression) != nil
             }
             .sorted {
                 if $0.name.count != $1.name.count {
                     return $0.name.count > $1.name.count
                 }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                let nameComparison = $0.name.localizedCaseInsensitiveCompare($1.name)
+                if nameComparison != .orderedSame {
+                    return nameComparison == .orderedAscending
+                }
+                return $0.bundleIdentifier < $1.bundleIdentifier
             }
     }
 }
