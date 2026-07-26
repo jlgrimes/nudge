@@ -5,7 +5,7 @@ struct CaptureView: View {
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             header
 
             if let preview = store.capturePreview {
@@ -23,7 +23,7 @@ struct CaptureView: View {
             }
         }
         .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .animation(.snappy(duration: 0.22), value: store.capturePreview?.id)
         .animation(.easeOut(duration: 0.16), value: store.inferenceErrorMessage)
         .onAppear {
@@ -94,42 +94,51 @@ struct CaptureView: View {
     }
 
     private func review(_ item: NudgeItem) -> some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(item.title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(item.title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
 
-                Label(item.contextLabel, systemImage: item.conditions.first?.kind.symbol ?? "sparkles")
+            Label(item.contextLabel, systemImage: item.conditions.first?.kind.symbol ?? "sparkles")
+                .lineLimit(1)
 
-                if item.action != .none {
-                    Label(item.action.label, systemImage: item.action.symbol)
-                }
-
-                Label(
-                    "Fallback \(item.fallbackAt.formatted(date: .abbreviated, time: .shortened))",
-                    systemImage: "clock"
-                )
-
-                Divider()
-
-                HStack {
-                    Button("Edit Request", action: store.reviseCapturePreview)
-                        .buttonStyle(.bordered)
-
-                    Spacer()
-
-                    Button("Save Nudge", action: store.commitCapturePreview)
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                }
+            if item.action != .none {
+                Label(item.action.label, systemImage: item.action.symbol)
+                    .lineLimit(1)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label("Confirm what Nudge understood", systemImage: "checkmark.bubble")
-                .font(.caption.weight(.medium))
+
+            Label(
+                "Fallback \(item.fallbackAt.formatted(date: .abbreviated, time: .shortened))",
+                systemImage: "clock"
+            )
+            .lineLimit(1)
+
+            Divider()
+
+            HStack {
+                Button("Edit Request", action: store.reviseCapturePreview)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                Spacer()
+
+                Button("Save Nudge", action: store.commitCapturePreview)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(10)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         }
     }
 
