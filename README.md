@@ -5,14 +5,15 @@ Nudge is a native macOS app for contextual reminders. Capture something once, th
 ## What works
 
 - Global capture with `Option-Space`
-- Context inference for messaging, shopping, calendar, browser, and general work reminders
+- On-device Apple Intelligence inference for messaging, shopping, calendar, browser, and general work reminders
+- Automatic fallback to a deterministic local parser when Apple Intelligence is unavailable
 - Live frontmost-app detection for supported messaging, calendar, browser, and productivity apps
 - Focus mode that quietly holds non-urgent reminders and releases them as a batch
 - Automatic fallback reminders after a configurable number of days
 - Local persistence for reminders, completion state, Focus state, and settings
 - A floating Liquid Glass timeline plus a menu-bar control
 
-Nudge performs app-context matching locally and does not require Accessibility permission.
+Nudge performs inference and app-context matching locally and does not require Accessibility permission or an API key.
 
 ## Inference architecture
 
@@ -24,14 +25,16 @@ Reminder creation depends on `NudgeInferenceProvider`, an asynchronous black-box
 - an optional action URL
 - an optional exact fallback date
 
-The production store talks only to `NudgeInferenceService`; it does not know how interpretation was produced. `MockLLMInferenceProvider` is the current provider and delegates to the deterministic string parser. A future OpenAI, Anthropic, Apple Intelligence, or local-model implementation can conform to the same protocol and be injected without changing capture, persistence, scheduling, or context matching.
+The production store talks only to `NudgeInferenceService`; it does not know how interpretation was produced.
 
-Providers can be composed with `FallbackInferenceProvider`, allowing a network model to fall back to the local rule-based provider when it is unavailable.
+`AppleIntelligenceInferenceProvider` is the default provider. It uses Apple’s Foundation Models framework and guided generation to receive a constrained Swift value directly from the on-device model. Before the generated value reaches the store, Nudge validates identifiers, URLs, confidence, fallback timing, and Focus interruption behavior.
+
+The live service wraps Apple Intelligence in `FallbackInferenceProvider`. If the device is ineligible, Apple Intelligence is disabled, the model is not ready, or generation fails, Nudge transparently falls back to `MockLLMInferenceProvider`, which delegates to the deterministic parser.
 
 ```swift
 let inference = NudgeInferenceService(
     provider: FallbackInferenceProvider(
-        primary: FutureLLMProvider(),
+        primary: AppleIntelligenceInferenceProvider(),
         fallback: MockLLMInferenceProvider()
     )
 )
@@ -42,9 +45,11 @@ let store = NudgeStore(
 )
 ```
 
+Other providers can conform to the same protocol and replace or compose with the default without changing capture, persistence, scheduling, or context matching.
+
 ## Run
 
-Requires macOS 26 and Xcode 26 or newer.
+Requires macOS 26 and Xcode 26 or newer. Apple Intelligence inference additionally requires a compatible Mac with Apple Intelligence enabled and its on-device model ready. Nudge remains usable through the local parser when those conditions are not met.
 
 ```bash
 git clone https://github.com/jlgrimes/nudge.git
@@ -80,4 +85,4 @@ swift test
 
 ## Current integration boundary
 
-Nudge currently observes frontmost application changes. URL-level browser matching and speech transcription are separate integrations; the production UI does not present mocked versions of either feature. The inference provider seam is ready for a real model, but no network LLM provider or API key storage is included yet.
+Nudge currently observes frontmost application changes. URL-level browser matching and speech transcription are separate integrations; the production UI does not present mocked versions of either feature. Apple Intelligence interprets the reminder, but it does not inspect browser tabs, calendar events, contacts, or message contents.
