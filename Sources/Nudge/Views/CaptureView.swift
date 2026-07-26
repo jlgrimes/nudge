@@ -9,6 +9,13 @@ struct CaptureView: View {
             header
             inputRow
 
+            if let errorMessage = store.inferenceErrorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .transition(.opacity)
+            }
+
             if let preview = store.capturePreview {
                 confirmation(preview)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -17,6 +24,7 @@ struct CaptureView: View {
         .padding(.horizontal, NudgePanelLayout.contentHorizontalPadding)
         .padding(.vertical, 14)
         .animation(.snappy(duration: 0.22), value: store.capturePreview?.id)
+        .animation(.easeOut(duration: 0.16), value: store.inferenceErrorMessage)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 isInputFocused = true
@@ -45,6 +53,7 @@ struct CaptureView: View {
             TextField("What should you remember?", text: $store.captureDraft)
                 .textFieldStyle(.roundedBorder)
                 .focused($isInputFocused)
+                .disabled(store.isInferring)
                 .onSubmit(store.createNudgeFromCapture)
 
             if NudgeRuntime.debugToolsEnabled {
@@ -53,13 +62,24 @@ struct CaptureView: View {
                         .symbolEffect(.variableColor.iterative, isActive: store.isListening)
                 }
                 .buttonStyle(.bordered)
-                .help("Simulate voice capture")
+                .help("Simulate Voice Capture")
             }
 
-            Button("Add", action: store.createNudgeFromCapture)
-                .buttonStyle(.borderedProminent)
-                .disabled(store.captureDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .keyboardShortcut(.defaultAction)
+            Button(action: store.createNudgeFromCapture) {
+                if store.isInferring {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(minWidth: 26)
+                } else {
+                    Text("Add")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+                store.isInferring
+                    || store.captureDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+            .keyboardShortcut(.defaultAction)
         }
         .controlSize(.regular)
     }
@@ -68,7 +88,10 @@ struct CaptureView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 5) {
                 Label(item.contextLabel, systemImage: item.triggers.first?.kind.symbol ?? "sparkles")
-                Label("Fallback in \(store.fallbackDays) days", systemImage: "clock")
+                Label(
+                    "Fallback \(item.fallbackAt.formatted(date: .abbreviated, time: .shortened))",
+                    systemImage: "clock"
+                )
             }
             .font(.caption)
             .foregroundStyle(.secondary)
