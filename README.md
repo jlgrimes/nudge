@@ -14,7 +14,7 @@ Nudge is a native macOS app for contextual reminders. Capture something once, th
 - Local persistence for reminders, completion state, Focus state, and settings
 - A floating Liquid Glass timeline plus a menu-bar control
 
-Nudge performs inference and app-context matching locally and does not require Accessibility permission, a cloud API key, or a network LLM request.
+Nudge performs inference and app-context matching locally. It does not require Accessibility permission, a cloud API key, or a network LLM request.
 
 ## Inference architecture
 
