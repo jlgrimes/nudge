@@ -28,11 +28,11 @@ final class AppContextMonitor {
     }
 
     private func handleActivation(bundleIdentifier: String, name: String) {
-        guard let context = ContextEvent.activatedApplication(
-            bundleIdentifier: bundleIdentifier,
-            name: name
-        ) else { return }
-
-        onContext(context)
+        onContext(
+            ContextEvent.activatedApplication(
+                bundleIdentifier: bundleIdentifier,
+                name: name
+            )
+        )
     }
 }

@@ -33,18 +33,20 @@ final class ContextInferenceEngineTests: XCTestCase {
             name: "Slack"
         )
 
-        XCTAssertEqual(event?.kind, .messaging)
-        XCTAssertEqual(event?.identifiers, ["com.tinyspeck.slackmacgap"])
-        XCTAssertEqual(event?.label, "Slack is active")
+        XCTAssertEqual(event.kind, .messaging)
+        XCTAssertEqual(event.identifiers, ["com.tinyspeck.slackmacgap"])
+        XCTAssertEqual(event.label, "Slack is active")
     }
 
-    func testUnrelatedApplicationDoesNotCreateAContext() {
+    func testUnknownApplicationStillCreatesAnExactApplicationContext() {
         let event = ContextEvent.activatedApplication(
-            bundleIdentifier: "com.apple.finder",
-            name: "Finder"
+            bundleIdentifier: "com.example.specialized-tool",
+            name: "Specialized Tool"
         )
 
-        XCTAssertNil(event)
+        XCTAssertEqual(event.kind, .application)
+        XCTAssertEqual(event.identifiers, ["com.example.specialized-tool"])
+        XCTAssertEqual(event.label, "Specialized Tool is active")
     }
 
     @MainActor
@@ -122,19 +124,23 @@ final class ContextInferenceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testQuickAddCreatesAnActiveTimelineNudgeAndCollapsesTheInput() {
-        let store = NudgeStore(seedDemoData: false)
+    func testQuickAddCreatesPendingContextualNudgeAndCollapsesTheInput() async {
+        let store = NudgeStore(
+            seedDemoData: false,
+            inferenceService: NudgeInferenceService(provider: MockLLMInferenceProvider())
+        )
         store.showQuickAdd()
         store.quickAddDraft = "Review the launch checklist"
 
-        store.createNudgeFromQuickAdd()
+        await store.createNudgeFromQuickAddNow()
 
         XCTAssertFalse(store.isQuickAddExpanded)
         XCTAssertTrue(store.quickAddDraft.isEmpty)
-        XCTAssertEqual(store.activeNudges.count, 1)
-        XCTAssertEqual(store.activeNudges.first?.status, .active)
-        XCTAssertEqual(store.activeNudges.first?.invocation, .temporal)
-        XCTAssertNotNil(store.activeNudges.first?.surfacedAt)
+        XCTAssertEqual(store.activeNudges.count, 0)
+        XCTAssertEqual(store.futureNudges.count, 1)
+        XCTAssertEqual(store.futureNudges.first?.status, .pending)
+        XCTAssertNil(store.futureNudges.first?.surfacedAt)
+        XCTAssertEqual(store.lastInferenceProviderID, "mock-rule-based")
     }
 
     @MainActor

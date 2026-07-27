@@ -20,6 +20,11 @@ final class NudgeStore {
         case focus
     }
 
+    private enum CreationSource {
+        case quickAdd
+        case capture
+    }
+
     static let shared = NudgeStore()
 
     var nudges: [NudgeItem] {
@@ -43,6 +48,9 @@ final class NudgeStore {
     }
     var fallbackDays = 2
     var isListening = false
+    var isInferring = false
+    var inferenceErrorMessage: String?
+    var lastInferenceProviderID: String?
     var activeDebugScenario: DebugScenario?
     var emphasizedNudgeIDs: Set<UUID> = [] {
         didSet { panelLayoutDidChange?() }
@@ -57,12 +65,18 @@ final class NudgeStore {
     @ObservationIgnored var presentationDidChange: (() -> Void)?
     @ObservationIgnored var panelLayoutDidChange: (() -> Void)?
     @ObservationIgnored var debugScenarioDidRun: (() -> Void)?
+    @ObservationIgnored private let inferenceService: NudgeInferenceService
+    @ObservationIgnored private var inferenceTask: Task<Void, Never>?
     @ObservationIgnored private var peekTask: Task<Void, Never>?
     @ObservationIgnored private var demoTask: Task<Void, Never>?
     @ObservationIgnored private var emphasisTask: Task<Void, Never>?
 
-    init(seedDemoData: Bool = true) {
+    init(
+        seedDemoData: Bool = true,
+        inferenceService: NudgeInferenceService = .live
+    ) {
         self.nudges = seedDemoData ? Self.demoNudges() : []
+        self.inferenceService = inferenceService
     }
 
     var activeNudges: [NudgeItem] {
@@ -119,6 +133,7 @@ final class NudgeStore {
         quickAddDraft = ""
         captureDraft = ""
         capturePreview = nil
+        inferenceErrorMessage = nil
         isListening = false
         presentation = .capture
     }
@@ -126,63 +141,138 @@ final class NudgeStore {
     func showQuickAdd() {
         peekTask?.cancel()
         quickAddDraft = ""
+        inferenceErrorMessage = nil
         isQuickAddExpanded = true
     }
 
     func cancelQuickAdd() {
         quickAddDraft = ""
+        inferenceErrorMessage = nil
         isQuickAddExpanded = false
     }
 
     func createNudgeFromQuickAdd() {
+        inferenceTask?.cancel()
+        inferenceTask = Task { @MainActor [weak self] in
+            await self?.createNudgeFromQuickAddNow()
+        }
+    }
+
+    func createNudgeFromQuickAddNow() async {
         let request = quickAddDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { return }
-
-        let inference = ContextInferenceEngine.infer(from: request)
-        let item = NudgeItem(
-            originalRequest: request,
-            title: inference.title,
-            detail: inference.detail,
-            priority: inference.priority,
-            triggers: inference.triggers,
-            fallbackAt: Calendar.current.date(byAdding: .day, value: fallbackDays, to: .now) ?? .now,
-            status: .active,
-            surfacedAt: .now,
-            primaryURL: inference.primaryURL,
-            canInterruptFocus: inference.canInterruptFocus
-        )
-
-        quickAddDraft = ""
-        withAnimation(.smooth(duration: 0.28)) {
-            isQuickAddExpanded = false
-            nudges.append(item)
-            if presentation == .peek {
-                presentation = .collapsed
-            }
-        }
-        emphasize([item.id])
-        activeContextLabel = "Added to your nudges"
+        await createNudge(from: request, source: .quickAdd)
     }
 
     func createNudgeFromCapture() {
+        inferenceTask?.cancel()
+        inferenceTask = Task { @MainActor [weak self] in
+            await self?.createNudgeFromCaptureNow()
+        }
+    }
+
+    func createNudgeFromCaptureNow() async {
         let request = captureDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { return }
+        await createNudge(from: request, source: .capture)
+    }
 
-        let inference = ContextInferenceEngine.infer(from: request)
-        let item = NudgeItem(
+    func commitCapturePreview() {
+        guard let item = capturePreview else { return }
+        nudges.append(item)
+        capturePreview = nil
+        captureDraft = ""
+        inferenceErrorMessage = nil
+        activeContextLabel = "Saved · waiting for context"
+        presentation = .expanded
+    }
+
+    func reviseCapturePreview() {
+        guard let item = capturePreview else { return }
+        captureDraft = item.originalRequest
+        capturePreview = nil
+        inferenceErrorMessage = nil
+        activeContextLabel = "Edit your request"
+    }
+
+    private func createNudge(from request: String, source: CreationSource) async {
+        guard !isInferring else { return }
+
+        isInferring = true
+        inferenceErrorMessage = nil
+        let referenceDate = Date.now
+        defer { isInferring = false }
+
+        do {
+            let response = try await inferenceService.infer(
+                text: request,
+                fallbackDays: fallbackDays,
+                referenceDate: referenceDate
+            )
+            guard !Task.isCancelled else { return }
+
+            lastInferenceProviderID = response.providerID
+            let inference = response.result
+            let fallbackAt = inference.fallbackAt
+                ?? Calendar.current.date(
+                    byAdding: .day,
+                    value: fallbackDays,
+                    to: referenceDate
+                )
+                ?? referenceDate
+
+            switch source {
+            case .quickAdd:
+                let item = makeNudge(
+                    request: request,
+                    inference: inference,
+                    fallbackAt: fallbackAt
+                )
+                quickAddDraft = ""
+                withAnimation(.smooth(duration: 0.28)) {
+                    isQuickAddExpanded = false
+                    nudges.append(item)
+                    if presentation == .peek {
+                        presentation = .collapsed
+                    }
+                }
+                activeContextLabel = "Added · waiting for context"
+
+            case .capture:
+                capturePreview = makeNudge(
+                    request: request,
+                    inference: inference,
+                    fallbackAt: fallbackAt
+                )
+                activeContextLabel = "Review inferred nudge"
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            inferenceErrorMessage = error.localizedDescription
+            activeContextLabel = "Couldn’t understand that nudge"
+        }
+    }
+
+    private func makeNudge(
+        request: String,
+        inference: InferenceResult,
+        fallbackAt: Date,
+        status: NudgeStatus = .pending,
+        surfacedAt: Date? = nil
+    ) -> NudgeItem {
+        NudgeItem(
             originalRequest: request,
             title: inference.title,
             detail: inference.detail,
             priority: inference.priority,
-            triggers: inference.triggers,
-            fallbackAt: Calendar.current.date(byAdding: .day, value: fallbackDays, to: .now) ?? .now,
-            primaryURL: inference.primaryURL,
+            conditions: inference.conditions,
+            fallbackAt: fallbackAt,
+            status: status,
+            surfacedAt: surfacedAt,
+            action: inference.action,
             canInterruptFocus: inference.canInterruptFocus
         )
-
-        nudges.append(item)
-        capturePreview = item
-        activeContextLabel = "Saved with inferred context"
     }
 
     func simulateVoiceCapture() {
@@ -202,7 +292,7 @@ final class NudgeStore {
 
         let matchingIDs = nudges.compactMap { item -> UUID? in
             guard item.status == .pending else { return nil }
-            let matches = item.triggers.contains { ContextInferenceEngine.matches(event, trigger: $0) }
+            let matches = item.conditions.contains { $0.matches(event) }
             return matches ? item.id : nil
         }
 
@@ -230,9 +320,7 @@ final class NudgeStore {
         }
         emphasize(activeMatchingIDs)
 
-        if wasExpanded {
-            panelLayoutDidChange?()
-        } else if presentation == .collapsed {
+        if wasExpanded || presentation == .collapsed {
             panelLayoutDidChange?()
         } else {
             showPeekTemporarily()
@@ -243,12 +331,7 @@ final class NudgeStore {
         guard let index = nudges.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .completed
-            emphasizedNudgeIDs.remove(id)
-            surfacedBatchNudgeIDs.remove(id)
-            if surfacedBatchNudgeIDs.count < 2 {
-                surfacedBatchNudgeIDs = []
-                emphasisBatchID = nil
-            }
+            removeEmphasis(for: id)
         }
         if activeNudges.isEmpty {
             collapse()
@@ -259,12 +342,16 @@ final class NudgeStore {
         guard let index = nudges.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(.easeOut(duration: 0.24)) {
             nudges[index].status = .dismissed
-            emphasizedNudgeIDs.remove(id)
-            surfacedBatchNudgeIDs.remove(id)
-            if surfacedBatchNudgeIDs.count < 2 {
-                surfacedBatchNudgeIDs = []
-                emphasisBatchID = nil
-            }
+            removeEmphasis(for: id)
+        }
+    }
+
+    private func removeEmphasis(for id: UUID) {
+        emphasizedNudgeIDs.remove(id)
+        surfacedBatchNudgeIDs.remove(id)
+        if surfacedBatchNudgeIDs.count < 2 {
+            surfacedBatchNudgeIDs = []
+            emphasisBatchID = nil
         }
     }
 
@@ -299,6 +386,7 @@ final class NudgeStore {
     }
 
     func resetDemo() {
+        inferenceTask?.cancel()
         demoTask?.cancel()
         peekTask?.cancel()
         emphasisTask?.cancel()
@@ -307,6 +395,9 @@ final class NudgeStore {
         surfacedBatchNudgeIDs = []
         emphasisBatchID = nil
         isFocusMode = false
+        isInferring = false
+        inferenceErrorMessage = nil
+        lastInferenceProviderID = nil
         recapMessage = nil
         activeContextLabel = "Context ready"
         captureDraft = ""
@@ -356,7 +447,7 @@ final class NudgeStore {
             demoTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 for item in dayNudges.dropFirst() {
-            try? await Task.sleep(for: .milliseconds(900))
+                    try? await Task.sleep(for: .milliseconds(900))
                     guard !Task.isCancelled else { return }
                     nudges.append(item)
                     emphasize([item.id])
@@ -425,6 +516,7 @@ final class NudgeStore {
     }
 
     private func prepareDebugScenario(_ scenario: DebugScenario) {
+        inferenceTask?.cancel()
         demoTask?.cancel()
         peekTask?.cancel()
         emphasisTask?.cancel()
@@ -434,6 +526,9 @@ final class NudgeStore {
         surfacedBatchNudgeIDs = []
         emphasisBatchID = nil
         isFocusMode = false
+        isInferring = false
+        inferenceErrorMessage = nil
+        lastInferenceProviderID = nil
         recapMessage = nil
         captureDraft = ""
         capturePreview = nil
@@ -469,8 +564,6 @@ final class NudgeStore {
                 surfacedBatchNudgeIDs = []
                 emphasisBatchID = nil
             } else if isBatch {
-                // The batch card is the emphasis. Its rows enter the timeline in
-                // their settled styling, without the legacy icon/text pulse.
                 withAnimation(.smooth(duration: 0.36)) {
                     surfacedBatchNudgeIDs = []
                     emphasisBatchID = nil
@@ -481,284 +574,5 @@ final class NudgeStore {
                 }
             }
         }
-    }
-
-    private static func demoNudges() -> [NudgeItem] {
-        let twoDays = Calendar.current.date(byAdding: .day, value: 2, to: .now) ?? .now
-        let messaging = ContextTrigger(
-            kind: .messaging,
-            identifiers: [
-                "com.tinyspeck.slackmacgap",
-                "com.apple.MobileSMS",
-                "com.microsoft.teams2",
-                "slack.com"
-            ],
-            confidence: 0.87,
-            source: .inferred
-        )
-        let shopping = ContextTrigger(
-            kind: .onlineShopping,
-            identifiers: ["amazon.com", "ebay.com", "walmart.com", "etsy.com", "target.com"],
-            confidence: 0.9,
-            source: .inferred
-        )
-        let calendar = ContextTrigger(
-            kind: .calendar,
-            identifiers: ["calendar.urgent"],
-            confidence: 1,
-            source: .explicit
-        )
-
-        return [
-            NudgeItem(
-                originalRequest: "Remind me to send Maya the final mockup",
-                title: "Send Maya the final mockup",
-                detail: "When you’re messaging",
-                triggers: [messaging],
-                fallbackAt: twoDays,
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Remind me to message Alex",
-                title: "Message Alex",
-                detail: "When you’re messaging",
-                triggers: [messaging],
-                fallbackAt: twoDays
-            ),
-            NudgeItem(
-                originalRequest: "Remind me to order coffee filters",
-                title: "Order coffee filters",
-                detail: "While you’re shopping online",
-                triggers: [shopping],
-                fallbackAt: twoDays,
-                primaryURL: URL(string: "https://amazon.com")
-            ),
-            NudgeItem(
-                originalRequest: "Leave for the dentist",
-                title: "Leave for the dentist",
-                detail: "12 min drive · appointment at 2:00",
-                priority: .urgent,
-                triggers: [calendar],
-                fallbackAt: .now,
-                canInterruptFocus: true
-            )
-        ]
-    }
-
-    private static func dayScenarioNudges() -> [NudgeItem] {
-        let context = ContextTrigger(
-            kind: .productivity,
-            identifiers: ["mock.day"],
-            confidence: 1,
-            source: .inferred
-        )
-        let messaging = ContextTrigger(
-            kind: .messaging,
-            identifiers: ["com.tinyspeck.slackmacgap", "com.apple.MobileSMS"],
-            confidence: 0.87,
-            source: .inferred
-        )
-        let calendar = ContextTrigger(
-            kind: .calendar,
-            identifiers: ["mock.calendar"],
-            confidence: 1,
-            source: .inferred
-        )
-        let fallback = Calendar.current.date(byAdding: .day, value: 2, to: .now) ?? .now
-
-        return [
-            NudgeItem(
-                originalRequest: "Morning overview",
-                title: "Plan the three things that matter today",
-                detail: "Morning overview",
-                priority: .informational,
-                triggers: [context],
-                fallbackAt: fallback,
-                createdAt: mockDate(hour: 8, minute: 30),
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Prepare for design review",
-                title: "Prepare for the design review",
-                detail: "Meeting in 40 minutes",
-                triggers: [calendar],
-                fallbackAt: fallback,
-                createdAt: mockDate(hour: 9, minute: 20),
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Message Alex",
-                title: "Message Alex about the launch",
-                detail: "Slack became active",
-                triggers: [messaging],
-                fallbackAt: fallback,
-                createdAt: mockDate(hour: 10, minute: 5),
-                status: .active,
-                invocation: .contextual(.messaging)
-            ),
-            NudgeItem(
-                originalRequest: "Submit lunch order",
-                title: "Submit the team lunch order",
-                detail: "Ordering closes soon",
-                priority: .urgent,
-                triggers: [context],
-                fallbackAt: fallback,
-                createdAt: mockDate(hour: 11, minute: 45),
-                status: .active,
-                canInterruptFocus: true
-            ),
-            NudgeItem(
-                originalRequest: "Review afternoon",
-                title: "Your afternoon is meeting-free",
-                detail: "A good time for focused work",
-                priority: .informational,
-                triggers: [calendar],
-                fallbackAt: fallback,
-                createdAt: mockDate(hour: 14, minute: 30),
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Wrap up",
-                title: "Capture loose ends before signing off",
-                detail: "End-of-day review",
-                triggers: [context],
-                fallbackAt: fallback,
-                createdAt: mockDate(hour: 17, minute: 15),
-                status: .active
-            )
-        ]
-    }
-
-    private static func singleScenarioTimeline() -> [NudgeItem] {
-        let messaging = ContextTrigger(
-            kind: .messaging,
-            identifiers: ["com.tinyspeck.slackmacgap", "com.apple.MobileSMS", "com.microsoft.teams2"],
-            confidence: 0.87,
-            source: .inferred
-        )
-        let context = ContextTrigger(
-            kind: .productivity,
-            identifiers: ["mock.single"],
-            confidence: 1,
-            source: .inferred
-        )
-        let fallback = Calendar.current.date(byAdding: .day, value: 2, to: .now) ?? .now
-        let now = Date.now
-
-        return [
-            NudgeItem(
-                originalRequest: "Review launch notes",
-                title: "Review the launch notes",
-                detail: "",
-                triggers: [context],
-                fallbackAt: fallback,
-                createdAt: now.addingTimeInterval(-900),
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Message Alex",
-                title: "Message Alex",
-                detail: "",
-                triggers: [messaging],
-                fallbackAt: fallback,
-                createdAt: now.addingTimeInterval(-2_400),
-                status: .pending
-            )
-        ]
-    }
-
-    private static func settledScenarioNudges() -> [NudgeItem] {
-        Array(dayScenarioNudges().prefix(2))
-    }
-
-    private static func multipleScenarioNudges() -> [NudgeItem] {
-        let context = ContextTrigger(
-            kind: .productivity,
-            identifiers: ["mock.batch"],
-            confidence: 1,
-            source: .inferred
-        )
-        let fallback = Calendar.current.date(byAdding: .day, value: 2, to: .now) ?? .now
-        return [
-            NudgeItem(
-                originalRequest: "Join design review",
-                title: "Join the design review",
-                detail: "Starts in 5 minutes",
-                priority: .urgent,
-                triggers: [context],
-                fallbackAt: fallback,
-                status: .active,
-                canInterruptFocus: true
-            ),
-            NudgeItem(
-                originalRequest: "Send prototype link",
-                title: "Send the prototype link to Maya",
-                detail: "Slack is active",
-                triggers: [context],
-                fallbackAt: fallback,
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Order coffee filters",
-                title: "Order coffee filters",
-                detail: "Shopping tab is open",
-                triggers: [context],
-                fallbackAt: fallback,
-                status: .active
-            ),
-            NudgeItem(
-                originalRequest: "Afternoon status",
-                title: "Your afternoon is meeting-free",
-                detail: "Informational",
-                priority: .informational,
-                triggers: [context],
-                fallbackAt: fallback,
-                status: .active
-            )
-        ]
-    }
-
-    private static func focusScenarioNudges() -> [NudgeItem] {
-        let context = ContextTrigger(
-            kind: .productivity,
-            identifiers: ["mock.focus"],
-            confidence: 1,
-            source: .inferred
-        )
-        let fallback = Calendar.current.date(byAdding: .day, value: 2, to: .now) ?? .now
-        return [
-            NudgeItem(
-                originalRequest: "Message Alex",
-                title: "Message Alex about the launch",
-                detail: "Held during Focus",
-                triggers: [context],
-                fallbackAt: fallback,
-                status: .deferred,
-                surfacedAt: Date.now.addingTimeInterval(-120)
-            ),
-            NudgeItem(
-                originalRequest: "Order coffee filters",
-                title: "Order coffee filters",
-                detail: "Held during Focus",
-                triggers: [context],
-                fallbackAt: fallback,
-                status: .deferred,
-                surfacedAt: Date.now.addingTimeInterval(-60)
-            ),
-            NudgeItem(
-                originalRequest: "Leave for dentist",
-                title: "Leave for the dentist",
-                detail: "Urgent · appointment at 2:00",
-                priority: .urgent,
-                triggers: [context],
-                fallbackAt: .now,
-                status: .active,
-                canInterruptFocus: true
-            )
-        ]
-    }
-
-    private static func mockDate(hour: Int, minute: Int) -> Date {
-        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: .now) ?? .now
     }
 }
